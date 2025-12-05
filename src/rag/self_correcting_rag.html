@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Self-Correcting RAG Workflow</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: radial-gradient(circle at 50% 50%, #0a0e27, #000000);
+            font-family: 'Courier New', monospace;
+            overflow-x: hidden;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1600px;
+            position: relative;
+        }
+
+        .title {
+            text-align: center;
+            color: #00ffff;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff;
+            letter-spacing: 3px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #00ff88;
+            font-size: 16px;
+            margin-bottom: 40px;
+            text-shadow: 0 0 10px #00ff88;
+        }
+
+        svg {
+            width: 100%;
+            height: auto;
+            filter: drop-shadow(0 0 20px rgba(0, 255, 255, 0.3));
+        }
+
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .node:hover {
+            filter: brightness(1.5);
+        }
+
+        .node-rect {
+            stroke-width: 2;
+            filter: drop-shadow(0 0 8px currentColor);
+        }
+
+        .node-text {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: bold;
+            pointer-events: none;
+        }
+
+        .node-subtext {
+            font-family: 'Courier New', monospace;
+            font-size: 8px;
+            pointer-events: none;
+            opacity: 0.8;
+        }
+
+        .edge {
+            fill: none;
+            stroke-width: 2;
+            stroke-dasharray: 5, 5;
+            animation: dash 20s linear infinite;
+        }
+
+        .edge-solid {
+            stroke-dasharray: none;
+            animation: glow 2s ease-in-out infinite;
+        }
+
+        .edge-heal {
+            stroke-width: 3;
+            animation: heal-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -1000;
+            }
+        }
+
+        @keyframes glow {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        @keyframes heal-pulse {
+            0%, 100% { 
+                opacity: 0.5;
+                stroke-width: 3;
+            }
+            50% { 
+                opacity: 1;
+                stroke-width: 4;
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% { 
+                transform: scale(1);
+                opacity: 0.8;
+            }
+            50% { 
+                transform: scale(1.05);
+                opacity: 1;
+            }
+        }
+
+        @keyframes data-flow {
+            0% { opacity: 0; r: 2; }
+            50% { opacity: 1; r: 4; }
+            100% { opacity: 0; r: 2; }
+        }
+
+        .data-particle {
+            animation: data-flow 2s ease-in-out infinite;
+        }
+
+        .pipeline-label {
+            font-size: 16px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px currentColor;
+        }
+
+        .legend {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(10, 14, 39, 0.9);
+            border: 2px solid #00ffff;
+            border-radius: 10px;
+            padding: 15px;
+            color: #fff;
+            font-size: 12px;
+            max-width: 250px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        .legend-title {
+            color: #00ffff;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border-radius: 3px;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        .marker-end {
+            animation: pulse 1s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="legend">
+        <div class="legend-title">PIPELINE LEGEND</div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #4a5fd9, #7b2cbf);"></div>
+            <span>Ingestion</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #00ff88, #00ffff);"></div>
+            <span>Retrieval</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: linear-gradient(135deg, #ffa500, #ffd700);"></div>
+            <span>Optimization</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #ff00ff;"></div>
+            <span>Healing Loop</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="title">⚡ SELF-CORRECTING RAG SYSTEM ⚡</div>
+        <div class="subtitle">LangGraph StateGraph Architecture • Holographic Data Flow Visualization</div>
+        
+        <svg viewBox="0 0 1400 1000" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <!-- Gradient definitions -->
+                <linearGradient id="ingestion-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#4a5fd9;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#7b2cbf;stop-opacity:1" />
+                </linearGradient>
+                <linearGradient id="retrieval-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00ff88;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#00ffff;stop-opacity:1" />
+                </linearGradient>
+                <linearGradient id="optimization-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ffa500;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#ffd700;stop-opacity:1" />
+                </linearGradient>
+                
+                <!-- Arrow markers -->
+                <marker id="arrow-ingestion" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#7b2cbf" class="marker-end"/>
+                </marker>
+                <marker id="arrow-retrieval" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#00ffff" class="marker-end"/>
+                </marker>
+                <marker id="arrow-optimization" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#ffd700" class="marker-end"/>
+                </marker>
+                <marker id="arrow-heal" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                    <path d="M0,0 L0,6 L9,3 z" fill="#ff00ff" class="marker-end"/>
+                </marker>
+            </defs>
+
+            <!-- Pipeline Labels -->
+            <text x="100" y="40" class="pipeline-label" fill="#7b2cbf">1. INGESTION PIPELINE</text>
+            <text x="700" y="40" class="pipeline-label" fill="#00ffff">2. RETRIEVAL PIPELINE</text>
+            <text x="1050" y="850" class="pipeline-label" fill="#ffd700">3. OPTIMIZATION LOOP</text>
+
+            <!-- INGESTION PIPELINE -->
+            <!-- Raw Data Input -->
+            <g class="node" style="animation: pulse 2s ease-in-out infinite;">
+                <rect x="50" y="80" width="140" height="70" rx="10" fill="url(#ingestion-grad)" class="node-rect" stroke="#7b2cbf"/>
+                <text x="120" y="110" text-anchor="middle" fill="#fff" class="node-text">RAW DATA</text>
+                <text x="120" y="125" text-anchor="middle" fill="#fff" class="node-subtext">.pdf • .docx • .txt</text>
+                <text x="120" y="138" text-anchor="middle" fill="#fff" class="node-subtext">📄 Input Sources</text>
+            </g>
+
+            <!-- Convert Markdown -->
+            <g class="node">
+                <rect x="50" y="200" width="140" height="70" rx="10" fill="url(#ingestion-grad)" class="node-rect" stroke="#7b2cbf"/>
+                <text x="120" y="225" text-anchor="middle" fill="#fff" class="node-text">convert_markdown</text>
+                <text x="120" y="240" text-anchor="middle" fill="#fff" class="node-subtext">Normalization</text>
+                <text x="120" y="253" text-anchor="middle" fill="#fff" class="node-subtext">🔄 Format Unification</text>
+            </g>
+
+            <!-- Classify Document -->
+            <g class="node">
+                <rect x="50" y="320" width="140" height="85" rx="10" fill="url(#ingestion-grad)" class="node-rect" stroke="#7b2cbf"/>
+                <text x="120" y="345" text-anchor="middle" fill="#fff" class="node-text">classify_document</text>
+                <text x="120" y="360" text-anchor="middle" fill="#fff" class="node-subtext">🔐 RBAC Tagging</text>
+                <text x="120" y="373" text-anchor="middle" fill="#fff" class="node-subtext">🏷️ Semantic Meta</text>
+                <text x="120" y="386" text-anchor="middle" fill="#fff" class="node-subtext">Metadata Enrichment</text>
+            </g>
+
+            <!-- Chunk Document -->
+            <g class="node">
+                <rect x="50" y="455" width="140" height="70" rx="10" fill="url(#ingestion-grad)" class="node-rect" stroke="#7b2cbf"/>
+                <text x="120" y="480" text-anchor="middle" fill="#fff" class="node-text">chunk_document</text>
+                <text x="120" y="495" text-anchor="middle" fill="#fff" class="node-subtext">Semantic Chunking</text>
+                <text x="120" y="508" text-anchor="middle" fill="#fff" class="node-subtext">✂️ Δ chunk_size</text>
+            </g>
+
+            <!-- ChromaDB Vector Store -->
+            <g class="node" style="animation: pulse 3s ease-in-out infinite;">
+                <ellipse cx="120" cy="600" rx="100" ry="60" fill="url(#ingestion-grad)" class="node-rect" stroke="#7b2cbf" stroke-width="3"/>
+                <text x="120" y="595" text-anchor="middle" fill="#fff" class="node-text">ChromaDB</text>
+                <text x="120" y="610" text-anchor="middle" fill="#fff" class="node-subtext">🗄️ Vector Store</text>
+                <text x="120" y="623" text-anchor="middle" fill="#fff" class="node-subtext">save_vectordb</text>
+            </g>
+
+            <!-- Ingestion Pipeline Edges -->
+            <path d="M 120 150 L 120 200" class="edge edge-solid" stroke="#7b2cbf" marker-end="url(#arrow-ingestion)"/>
+            <path d="M 120 270 L 120 320" class="edge edge-solid" stroke="#7b2cbf" marker-end="url(#arrow-ingestion)"/>
+            <path d="M 120 405 L 120 455" class="edge edge-solid" stroke="#7b2cbf" marker-end="url(#arrow-ingestion)"/>
+            <path d="M 120 525 L 120 540" class="edge edge-solid" stroke="#7b2cbf" marker-end="url(#arrow-ingestion)"/>
+
+            <!-- Data particles animation on ingestion path -->
+            <circle class="data-particle" cx="120" cy="175" r="3" fill="#00ffff" style="animation-delay: 0s;"/>
+            <circle class="data-particle" cx="120" cy="295" r="3" fill="#00ffff" style="animation-delay: 0.5s;"/>
+            <circle class="data-particle" cx="120" cy="430" r="3" fill="#00ffff" style="animation-delay: 1s;"/>
+            <circle class="data-particle" cx="120" cy="515" r="3" fill="#00ffff" style="animation-delay: 1.5s;"/>
+
+            <!-- RETRIEVAL PIPELINE -->
+            <!-- User Query -->
+            <g class="node" style="animation: pulse 2s ease-in-out infinite;">
+                <rect x="630" y="80" width="140" height="70" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="110" text-anchor="middle" fill="#000" class="node-text">HumanMessage</text>
+                <text x="700" y="125" text-anchor="middle" fill="#000" class="node-subtext">💬 User Query</text>
+                <text x="700" y="138" text-anchor="middle" fill="#000" class="node-subtext">Input Trigger</text>
+            </g>
+
+            <!-- Retrieve Context -->
+            <g class="node">
+                <rect x="630" y="200" width="140" height="70" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="225" text-anchor="middle" fill="#000" class="node-text">retrieve_context</text>
+                <text x="700" y="240" text-anchor="middle" fill="#000" class="node-subtext">🔍 Vector Search</text>
+                <text x="700" y="253" text-anchor="middle" fill="#000" class="node-subtext">Top-k Retrieval</text>
+            </g>
+
+            <!-- Rerank Context -->
+            <g class="node">
+                <rect x="630" y="320" width="140" height="70" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="345" text-anchor="middle" fill="#000" class="node-text">rerank_context</text>
+                <text x="700" y="360" text-anchor="middle" fill="#000" class="node-subtext">⚡ Cross-Encoder</text>
+                <text x="700" y="373" text-anchor="middle" fill="#000" class="node-subtext">Re-ranking</text>
+            </g>
+
+            <!-- Check Optimization -->
+            <g class="node">
+                <rect x="630" y="440" width="140" height="85" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="465" text-anchor="middle" fill="#000" class="node-text">check_optimization</text>
+                <text x="700" y="480" text-anchor="middle" fill="#000" class="node-subtext">🤖 RL Healing Agent</text>
+                <text x="700" y="493" text-anchor="middle" fill="#000" class="node-subtext">Decision: Heal/OK</text>
+                <text x="700" y="508" text-anchor="middle" fill="#000" class="node-subtext">📊 Quality Check</text>
+            </g>
+
+            <!-- Optimize Context (Healing Node) -->
+            <g class="node">
+                <rect x="380" y="455" width="140" height="70" rx="10" fill="#ff00ff" class="node-rect" stroke="#ff00ff"/>
+                <text x="450" y="480" text-anchor="middle" fill="#fff" class="node-text">optimize_context</text>
+                <text x="450" y="495" text-anchor="middle" fill="#fff" class="node-subtext">🔧 Δ Parameters</text>
+                <text x="450" y="508" text-anchor="middle" fill="#fff" class="node-subtext">chunk_size • k</text>
+            </g>
+
+            <!-- Answer Question -->
+            <g class="node">
+                <rect x="630" y="580" width="140" height="70" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="605" text-anchor="middle" fill="#000" class="node-text">answer_question</text>
+                <text x="700" y="620" text-anchor="middle" fill="#000" class="node-subtext">🧠 LLM Synthesis</text>
+                <text x="700" y="633" text-anchor="middle" fill="#000" class="node-subtext">Response Gen</text>
+            </g>
+
+            <!-- Validate Guardrails -->
+            <g class="node">
+                <rect x="630" y="700" width="140" height="85" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="725" text-anchor="middle" fill="#000" class="node-text">validate_guardrails</text>
+                <text x="700" y="740" text-anchor="middle" fill="#000" class="node-subtext">🛡️ PII Filter</text>
+                <text x="700" y="753" text-anchor="middle" fill="#000" class="node-subtext">Hallucination Check</text>
+                <text x="700" y="766" text-anchor="middle" fill="#000" class="node-subtext">Policy Compliance</text>
+            </g>
+
+            <!-- Traceability -->
+            <g class="node">
+                <rect x="630" y="830" width="140" height="70" rx="10" fill="url(#retrieval-grad)" class="node-rect" stroke="#00ffff"/>
+                <text x="700" y="855" text-anchor="middle" fill="#000" class="node-text">traceability</text>
+                <text x="700" y="870" text-anchor="middle" fill="#000" class="node-subtext">📝 Audit Log</text>
+                <text x="700" y="883" text-anchor="middle" fill="#000" class="node-subtext">Final Output</text>
+            </g>
+
+            <!-- Retrieval Pipeline Edges -->
+            <path d="M 700 150 L 700 200" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+            <path d="M 700 270 L 700 320" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+            <path d="M 700 390 L 700 440" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+            <path d="M 700 525 L 700 580" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+            <path d="M 700 650 L 700 700" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+            <path d="M 700 785 L 700 830" class="edge edge-solid" stroke="#00ffff" marker-end="url(#arrow-retrieval)"/>
+
+            <!-- Connection from VectorDB to Retrieve -->
+            <path d="M 220 600 Q 400 600, 500 450 Q 550 350, 630 235" class="edge" stroke="#7b2cbf" marker-end="url(#arrow-ingestion)" stroke-width="2"/>
+
+            <!-- Healing Loop -->
+            <!-- Check to Optimize (Heal Decision) -->
+            <path d="M 630 482 L 520 490" class="edge edge-heal" stroke="#ff00ff" marker-end="url(#arrow-heal)"/>
+            <text x="570" y="475" fill="#ff00ff" font-size="10" font-weight="bold">HEAL</text>
+            
+            <!-- Optimize back to Retrieve (Feedback Loop) -->
+            <path d="M 450 455 Q 450 350, 550 270 Q 590 240, 630 235" class="edge edge-heal" stroke="#ff00ff" marker-end="url(#arrow-heal)"/>
+            <text x="500" y="360" fill="#ff00ff" font-size="10" font-weight="bold">RE-ENTER</text>
+
+            <!-- OK path label -->
+            <text x="720" y="560" fill="#00ff88" font-size="10" font-weight="bold">✓ OK</text>
+
+            <!-- OPTIMIZATION FEEDBACK LOOP -->
+            <!-- Optimization Engine -->
+            <g class="node" style="animation: pulse 4s ease-in-out infinite;">
+                <rect x="950" y="750" width="180" height="100" rx="10" fill="url(#optimization-grad)" class="node-rect" stroke="#ffd700" stroke-width="3"/>
+                <text x="1040" y="780" text-anchor="middle" fill="#000" class="node-text" font-size="13">Optimization Engine</text>
+                <text x="1040" y="795" text-anchor="middle" fill="#000" class="node-subtext">⚙️ Global Config</text>
+                <text x="1040" y="808" text-anchor="middle" fill="#000" class="node-subtext">Hyperparameter Tuning</text>
+                <text x="1040" y="821" text-anchor="middle" fill="#000" class="node-subtext">Performance Metrics</text>
+                <text x="1040" y="834" text-anchor="middle" fill="#000" class="node-subtext">📈 RL Feedback</text>
+            </g>
+
+            <!-- Feedback from Check Optimization to Engine -->
+            <path d="M 770 482 Q 850 600, 950 780" class="edge" stroke="#ffd700" marker-end="url(#arrow-optimization)" stroke-width="2"/>
+            
+            <!-- Feedback from Traceability to Engine -->
+            <path d="M 770 865 Q 850 850, 950 815" class="edge" stroke="#ffd700" marker-end="url(#arrow-optimization)" stroke-width="2"/>
+            
+            <!-- Engine to Optimize Context -->
+            <path d="M 950 800 Q 700 650, 520 490" class="edge" stroke="#ffd700" marker-end="url(#arrow-optimization)" stroke-width="2" stroke-dasharray="8,4"/>
+
+            <!-- Annotations -->
+            <text x="860" y="640" fill="#ffd700" font-size="9" font-style="italic">Metrics Feed</text>
+            <text x="830" y="870" fill="#ffd700" font-size="9" font-style="italic">Audit Feed</text>
+            <text x="680" y="620" fill="#ffd700" font-size="9" font-style="italic">Config Updates</text>
+
+            <!-- Data flow particles on retrieval path -->
+            <circle class="data-particle" cx="700" cy="175" r="3" fill="#00ffff" style="animation-delay: 0s;"/>
+            <circle class="data-particle" cx="700" cy="295" r="3" fill="#00ffff" style="animation-delay: 0.3s;"/>
+            <circle class="data-particle" cx="700" cy="415" r="3" fill="#00ffff" style="animation-delay: 0.6s;"/>
+            <circle class="data-particle" cx="700" cy="555" r="3" fill="#00ffff" style="animation-delay: 0.9s;"/>
+            <circle class="data-particle" cx="700" cy="675" r="3" fill="#00ffff" style="animation-delay: 1.2s;"/>
+            <circle class="data-particle" cx="700" cy="810" r="3" fill="#00ffff" style="animation-delay: 1.5s;"/>
+
+            <!-- Healing loop particles -->
+            <circle class="data-particle" cx="575" cy="482" r="3" fill="#ff00ff" style="animation-delay: 0.2s;"/>
+            <circle class="data-particle" cx="500" cy="360" r="3" fill="#ff00ff" style="animation-delay: 1.2s;"/>
+        </svg>
+    </div>
+
+    <script>
+        // Add interactivity
+        document.querySelectorAll('.node').forEach(node => {
+            node.addEventListener('click', function() {
+                const text = this.querySelector('.node-text').textContent;
+                console.log(`Node clicked: ${text}`);
+            });
+        });
+
+        // Dynamic particle creation for data flow
+        function createFlowParticles() {
+            const svg = document.querySelector('svg');
+            const paths = [
+                {x: 120, start: 150, end: 540, color: '#7b2cbf'},
+                {x: 700, start: 150, end: 830, color: '#00ffff'}
+            ];
+
+            paths.forEach(path => {
+                setInterval(() => {
+                    const particle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    particle.setAttribute('cx', path.x);
+                    particle.setAttribute('cy', path.start);
+                    particle.setAttribute('r', '2');
+                    particle.setAttribute('fill', path.color);
+                    particle.style.opacity = '0';
+                    svg.appendChild(particle);
+
+                    let currentY = path.start;
+                    const interval = setInterval(() => {
+                        currentY += 5;
+                        particle.setAttribute('cy', currentY);
+                        particle.style.opacity = Math.sin((currentY - path.start) / (path.end - path.start) * Math.PI);
+                        
+                        if (currentY >= path.end) {
+                            clearInterval(interval);
+                            svg.removeChild(particle);
+                        }
+                    }, 50);
+                }, 3000);
+            });
+        }
+
+        createFlowParticles();
+    </script>
+</body>
+</html>
