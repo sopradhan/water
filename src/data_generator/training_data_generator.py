@@ -12,6 +12,7 @@ Realistic water distribution network simulation with:
 
 import json
 import numpy as np
+import pandas as pd
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,7 +43,7 @@ BRANCH_SPECS = {
 
 # Zone characteristics
 ZONE_CHARACTERISTICS = {
-    "Zone0": {"type": "local_distribution", "base_demand_lpm": 800, "population": 2000},
+    "Zone0": {"type": "distribution_hub", "base_demand_lpm": 800, "population": 2000},
     "Zone1": {"type": "residential", "base_demand_lpm": 1200, "population": 5000},
     "Zone2": {"type": "commercial", "base_demand_lpm": 1500, "population": 3000},
     "Zone3": {"type": "industrial", "base_demand_lpm": 2000, "population": 1000},
@@ -224,10 +225,13 @@ class WaterDatasetGenerator:
 
         return rpm, vibration, acoustic, ultrasonic_base
 
-    def generate_reading(self, zone_name, timestamp, master_flow_lpm, zones_demand, leak_factor=1.0):
+    def generate_reading(self, zone_name, timestamp, master_flow_lpm, zones_demand, 
+                        anomaly_type=None, leak_factor=1.0):
         """
         Generate a sensor reading for a zone at a specific timestamp.
-        Incorporates hydraulic physics, demand model, and leak effects.
+        Incorporates hydraulic physics, demand model, and optional anomaly injection.
+        
+        anomaly_type: None (normal), 'leak', 'defect', 'illegal', 'maintenance'
         """
         hour = timestamp.hour
         month = timestamp.month
@@ -278,17 +282,45 @@ class WaterDatasetGenerator:
             10: np.random.uniform(22, 30), 11: np.random.uniform(20, 28),
         }.get(month, 28)
         
-        # Determine anomaly class based on pressure/flow
-        if zone_pressure < 35 or zone_flow > zone_demand * 1.8:
-            class_label = "Leak"
-        elif zone_pressure > 140 or vibration > 8:
-            class_label = "Defect"
-        elif zone_flow < zone_demand * 0.4:
-            class_label = "IllegalConnection"
-        elif pipe_age > 35 and vibration > 6:
-            class_label = "MaintenanceRequired"
+        # Inject anomaly-specific modifications
+        if anomaly_type == "leak":
+            zone_pressure -= np.random.uniform(20, 50)  # Pressure drop from leak
+            zone_flow = zone_demand * np.random.uniform(1.3, 1.8)  # Excess flow
+            vibration += np.random.uniform(1, 3)  # Turbulence from leak
+        elif anomaly_type == "defect":
+            zone_pressure += np.random.uniform(5, 15)  # Pressure spike
+            vibration += np.random.uniform(4, 8)  # High vibration from defect
+            acoustic += np.random.uniform(10, 20)  # Acoustic disturbance
+        elif anomaly_type == "illegal":
+            zone_flow = zone_demand * np.random.uniform(0.2, 0.4)  # Low flow (diverted)
+            zone_pressure += np.random.uniform(2, 8)  # Slight pressure increase
+        elif anomaly_type == "maintenance":
+            pipe_age = np.random.randint(36, 50)  # Old pipe
+            vibration += np.random.uniform(5, 10)  # Excessive vibration
+            zone_pressure -= np.random.uniform(5, 15)  # Pressure loss
+        
+        # Determine class label based on anomaly type or thresholds
+        if anomaly_type:
+            if anomaly_type == "leak":
+                class_label = "Leak"
+            elif anomaly_type == "defect":
+                class_label = "Defect"
+            elif anomaly_type == "illegal":
+                class_label = "IllegalConnection"
+            elif anomaly_type == "maintenance":
+                class_label = "MaintenanceRequired"
         else:
-            class_label = "Normal"
+            # Fallback to threshold-based classification
+            if zone_pressure < 35 or zone_flow > zone_demand * 1.8:
+                class_label = "Leak"
+            elif zone_pressure > 140 or vibration > 8:
+                class_label = "Defect"
+            elif zone_flow < zone_demand * 0.4:
+                class_label = "IllegalConnection"
+            elif pipe_age > 35 and vibration > 6:
+                class_label = "MaintenanceRequired"
+            else:
+                class_label = "Normal"
 
         record = {
             "ZoneName": zone_name,
@@ -330,7 +362,8 @@ class WaterDatasetGenerator:
 
     def generate_batch(self, name, num_samples, days=365):
         """
-        Generate a batch of training data.
+        Generate a batch of training data with mixed normal and anomalous samples.
+        Distribution: 70% Normal, 10% Leak, 8% Defect, 7% Illegal, 5% Maintenance
         """
         records = []
         start_date = datetime.now() - timedelta(days=days)
@@ -338,6 +371,15 @@ class WaterDatasetGenerator:
         # Time resolution: hourly samples
         hours_total = days * 24
         sample_interval = max(1, hours_total // num_samples)
+        
+        # Anomaly distribution
+        anomaly_distribution = {
+            None: 0.70,  # Normal
+            "leak": 0.10,
+            "defect": 0.08,
+            "illegal": 0.07,
+            "maintenance": 0.05,
+        }
 
         for i in range(0, hours_total, sample_interval):
             timestamp = start_date + timedelta(hours=i)
@@ -360,11 +402,21 @@ class WaterDatasetGenerator:
                     leak_factor=1.0
                 )
             
-            # Simulate occasional leaks (5% chance per zone)
+            # Generate reading for each zone with random anomaly injection
             for zone in self.zones:
-                leak_factor = np.random.choice([1.0, 1.0, 1.0, 1.0, 1.3], p=[0.8, 0.05, 0.05, 0.05, 0.05])
+                # Randomly select anomaly type based on distribution
+                anomaly_type = np.random.choice(
+                    list(anomaly_distribution.keys()),
+                    p=list(anomaly_distribution.values())
+                )
                 
-                record = self.generate_reading(zone, timestamp, master_flow_lpm, zones_demand, leak_factor)
+                record = self.generate_reading(
+                    zone, 
+                    timestamp, 
+                    master_flow_lpm, 
+                    zones_demand,
+                    anomaly_type=anomaly_type
+                )
                 records.append(record)
             
             if len(records) >= num_samples:
@@ -375,6 +427,10 @@ class WaterDatasetGenerator:
             json.dump(records[:num_samples], f, indent=2)
 
         print(f"✓ Generated {name} ({len(records[:num_samples])} rows)")
+        
+        # Print class distribution
+        classes = [r['class_label'] for r in records[:num_samples]]
+        print(f"  Class distribution: {dict(pd.Series(classes).value_counts())}")
 
     def generate_all(self):
         """Generate all training batches."""

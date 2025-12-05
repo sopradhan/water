@@ -26,7 +26,9 @@ from src.rag.visualization.langgraph_visualizer import create_visualization, sav
 from src.rag.visualization.animated_graph_visualizer import create_ingestion_tracker, create_retrieval_tracker, AnimatedGraphTracker
 
 # Import Enhanced RAG tools (new tools for generic RAG system)
-from src.rag.tools.document_markdown_converter import convert_to_markdown_tool
+# NOTE: convert_to_markdown_tool imports docling which has heavy dependencies
+# This is lazily imported when actually needed to avoid startup delays
+# from src.rag.tools.document_markdown_converter import convert_to_markdown_tool
 from src.rag.tools.rbac_retrieval_tool import retrieve_with_rbac_tool, generate_response_with_mode_tool, UserRole
 
 # Import RAG tools
@@ -56,6 +58,9 @@ from src.rag.tools.healing_tools import (
 )
 from src.rag.tools.adjust_config_tool import adjust_config_tool
 from src.rag.tools.services.llm_service import LLMService
+
+# Import RAGAS evaluator for quality metrics
+from src.rag.evaluation.ragas_evaluator import get_ragas_evaluator, RAGAS_AVAILABLE
 from src.rag.tools.services.vectordb_service import VectorDBService
 from src.rag.config.env_config import EnvConfig
 from src.rag.config.prompt_loader import load_prompt, get_system_prompt
@@ -119,12 +124,9 @@ class LangGraphRAGAgent:
        
         llm_service = LLMService(llm_config)
         
-        # Use EnvConfig for VectorDB paths
-        chroma_db_path = EnvConfig.get_chroma_db_path()
-        # Note: Collection name created dynamically per company_id via _get_collection_name()
+        # Initialize VectorDBService with ChromaDB local persistence
         vectordb_service = VectorDBService(
-            persist_directory=chroma_db_path,
-            collection_name=os.getenv("CHROMA_COLLECTION", "rag_embeddings_default")
+            collection_name=os.getenv("VECTOR_DB_COLLECTION", "water_anomaly_detection")
         )
         
         return llm_service, vectordb_service
@@ -132,7 +134,7 @@ class LangGraphRAGAgent:
     def _init_rl_agent(self):
         """Initialize RL Healing Agent using environment configuration."""
         try:
-            db_path = EnvConfig.get_db_path()
+            db_path = EnvConfig.get_rag_db_path()
             return RLHealingAgent(db_path, llm_service=self.llm_service)
         except Exception as e:
             print(f"Warning: Failed to initialize RL agent: {e}")
@@ -261,6 +263,10 @@ class LangGraphRAGAgent:
                 source_type = state.get("source_type", "txt")
                 title = state.get("title", state.get("doc_id", "document"))
                 # Note: company_id and dept_id flow through state dict and passed to save_vectordb_node
+                
+                # Lazy import of heavy docling dependencies
+                from src.rag.tools.document_markdown_converter import convert_to_markdown_tool
+                
                 if source_path and os.path.exists(source_path):
                     # Convert from file path
                     markdown_response = convert_to_markdown_tool.invoke({
@@ -844,12 +850,6 @@ class LangGraphRAGAgent:
                         collection_name=collection_name
                     )
                     
-                    print(f"[DEBUG RETRIEVE] Querying collection={collection_name}")
-                    print(f"[DEBUG RETRIEVE] Company ID={user_company_id}, Dept ID={user_dept_id}, User ID={state.get('user_id')}")
-                    print(f"[DEBUG RETRIEVE] RBAC Filter: {rbac_filter}")
-                    print(f"[DEBUG RETRIEVE] Question: {enhanced_question[:100]}...")
-                    print(f"[DEBUG RETRIEVE] Collection has {vectordb_service.collection.count()} vectors")
-                    
                     # TOOL: retrieve_context_tool
                     # WHEN: Question answering starts - need to find relevant documents
                     # INPUT: question (user query with intent keywords), k (top results from state), 
@@ -874,7 +874,6 @@ class LangGraphRAGAgent:
                     # Merge results from this collection
                     if collection_context.get("context"):
                         all_context["context"].extend(collection_context["context"])
-                        print(f"[DEBUG RETRIEVE] Retrieved {len(collection_context['context'])} chunks from {collection_name}")
                 
                 # Use merged results from all collections
                 state["context"] = all_context
@@ -882,7 +881,6 @@ class LangGraphRAGAgent:
                 state["collection_name"] = ", ".join(collections_to_query)  # Log all queried collections
                 
                 retrieved_count = len(state["context"].get("context", []))
-                print(f"[DEBUG RETRIEVE] Retrieved {retrieved_count} total chunks from {len(collections_to_query)} collection(s): {collections_to_query}")
                 
                 state["retrieval_quality"] = min(1.0, retrieved_count / max(state.get("top_k", 5), 1))  # Normalize to 0-1
                 state["rbac_filter_applied"] = rbac_filter
@@ -1053,7 +1051,7 @@ class LangGraphRAGAgent:
                 # Log healing action if RL agent made a recommendation
                 try:
                     if state.get("should_optimize") and state.get("rl_action") and state.get("rl_action") != "SKIP":
-                        from src.database.models.rag_history_model import RAGHistoryModel
+                        from src.rag.rag_db_models.db_models import RAGHistoryModel
                         
                         print(f"[DEBUG] Logging healing action: should_optimize={state.get('should_optimize')}, rl_action={state.get('rl_action')}")
                         
@@ -1167,15 +1165,19 @@ class LangGraphRAGAgent:
                 try:
                     if isinstance(answer_response, str):
                         answer_parsed = json.loads(answer_response)
-                        state["answer"] = answer_parsed.get("answer", answer_response)
+                        state["answer"] = answer_parsed.get("answer", "")
+                        # Store confidence data for all modes
+                        state["answer_confidence"] = answer_parsed.get("combined_confidence", 0.5)
+                        state["embedding_confidence"] = answer_parsed.get("embedding_confidence", 0.5)
+                        state["requires_clarification"] = answer_parsed.get("requires_clarification", False)
                         if show_debug:
                             print(f"  [DEBUG] Parsed answer from JSON: {str(state['answer'])[:100]}")
                     else:
-                        state["answer"] = answer_response
+                        state["answer"] = str(answer_response) if answer_response else ""
                         if show_debug:
                             print(f"  [DEBUG] Answer already parsed (not string): {str(answer_response)[:100]}")
                 except Exception as e:
-                    state["answer"] = answer_response
+                    state["answer"] = str(answer_response) if answer_response else ""
                     if show_debug:
                         print(f"  [DEBUG] Failed to parse answer JSON: {e}, using raw response: {str(answer_response)[:100]}")
                 
@@ -1183,11 +1185,54 @@ class LangGraphRAGAgent:
                 
                 if show_debug:
                     print(f"  ✓ Answer Generated ({len(str(state['answer']).split())} words)")
-                    print(f"  Answer Preview: {str(state['answer'])[:100]}...")
                 
+                # ====================================================================
+                # RAGAS EVALUATION: Quality metrics for RAG pipeline
+                # ====================================================================
+                if RAGAS_AVAILABLE:
+                    try:
+                        evaluator = get_ragas_evaluator(self.llm_service)
+                        
+                        # Extract context chunks for evaluation
+                        context_chunks = []
+                        reranked = state.get("reranked_context", {}).get("reranked_context", [])
+                        for chunk in reranked:
+                            context_chunks.append(chunk.get("text", ""))
+                        
+                        # Run RAGAS evaluation
+                        ragas_score = evaluator.evaluate_query(
+                            question=state["question"],
+                            context=context_chunks,
+                            answer=state["answer"]
+                        )
+                        
+                        # Store RAGAS metrics in state
+                        state["ragas_scores"] = ragas_score.to_dict()
+                        
+                        if show_debug:
+                            print(f"\n[📊 RAGAS METRICS]")
+                            print(f"  Faithfulness: {ragas_score.faithfulness:.2%}")
+                            print(f"  Answer Relevancy: {ragas_score.answer_relevancy:.2%}")
+                            print(f"  Context Recall: {ragas_score.context_recall:.2%}")
+                            print(f"  Context Precision: {ragas_score.context_precision:.2%}")
+                            print(f"  Answer Semantic Similarity: {ragas_score.answer_semantic_similarity:.2%}")
+                            print(f"  Overall Score: {ragas_score.overall_score:.2%}")
+                    except Exception as e:
+                        if show_debug:
+                            print(f"[⚠] RAGAS evaluation failed: {e}")
+                else:
+                    if show_debug:
+                        print(f"[⚠] RAGAS evaluation not available")
+                
+                    if show_debug:
+                        print(f"  [RAGAS] Evaluation skipped: {e}")
+                    state["ragas_scores"] = {}
+                
+                # End RAGAS evaluation
                 if tracker:
                     tracker.node_end("answer_question", {
-                        "answer_length": len(str(answer_response).split()),
+                        "answer_length": len(str(state["answer"]).split()),
+                        "ragas_overall": state.get("ragas_scores", {}).get("overall_score", 0),
                         "status": state.get("status")
                     }, "success")
                     tracker.edge_traversal("answer_question", "validate_guardrails", ["answer", "question"])
@@ -1199,7 +1244,7 @@ class LangGraphRAGAgent:
                 
                 # Log query to database with metrics
                 try:
-                    from src.database.models.rag_history_model import RAGHistoryModel
+                    from src.rag.rag_db_models.db_models import RAGHistoryModel
                     
                     reranked = state.get("reranked_context", {}).get("reranked_context", [])
                     
@@ -1215,7 +1260,13 @@ class LangGraphRAGAgent:
                         "user_feedback": 0.7,  # Default, will be updated by user
                         "quality_category": "warm" if state.get("retrieval_quality", 0) > 0.6 else "cold",
                         "sources_count": len(reranked),
-                        "response_mode": response_mode
+                        "response_mode": response_mode,
+                        # RAGAS metrics
+                        "ragas_faithfulness": state.get("ragas_scores", {}).get("faithfulness", 0.5),
+                        "ragas_answer_relevancy": state.get("ragas_scores", {}).get("answer_relevancy", 0.5),
+                        "ragas_context_recall": state.get("ragas_scores", {}).get("context_recall", 0.5),
+                        "ragas_context_precision": state.get("ragas_scores", {}).get("context_precision", 0.5),
+                        "ragas_overall_score": state.get("ragas_scores", {}).get("overall_score", 0.5)
                     }
                     
                     rag_history = RAGHistoryModel()
@@ -1254,7 +1305,8 @@ class LangGraphRAGAgent:
                     
                     # Verify it was written
                     if response_mode == "verbose":
-                        cur = rag_history.conn.execute("SELECT COUNT(*) FROM rag_history_and_optimization WHERE event_type = 'QUERY'")
+                        conn = rag_history._get_connection()
+                        cur = conn.execute("SELECT COUNT(*) FROM rag_history_and_optimization WHERE event_type = 'QUERY'")
                         count = cur.fetchone()[0]
                         print(f"  Database Total QUERY Events: {count}")
                     
@@ -1387,7 +1439,7 @@ class LangGraphRAGAgent:
                 
                 # Log guardrail check to database
                 try:
-                    from src.database.models.rag_history_model import RAGHistoryModel
+                    from src.rag.rag_db_models.db_models import RAGHistoryModel
                     
                     rag_history = RAGHistoryModel()
                     reranked_context = state.get("reranked_context", {}).get("reranked_context", [])
@@ -1581,13 +1633,21 @@ class LangGraphRAGAgent:
                 llm_output=answer
             )
             
+            # If content is blocked, use the safety explanation instead of the original answer
+            if validation_result.get('content_blocked'):
+                filtered = validation_result.get('safety_explanation', 'Unable to provide this information due to safety restrictions.')
+            else:
+                filtered = validation_result.get("filtered_output", answer)
+            
             return {
                 "validated": validation_result.get("success", False),
                 "guardrails_applied": True,
-                "answer": validation_result.get("filtered_output", answer),
+                "answer": filtered,
                 "validation_mode": response_mode,
                 "safety_level": validation_result.get("safety_level", "unknown"),
-                "issues": validation_result.get("output_errors", [])
+                "issues": validation_result.get("output_errors", []),
+                "content_blocked": validation_result.get('content_blocked', False),
+                "block_reason": validation_result.get('block_reason')
             }
         except Exception as e:
             print(f"[WARNING] Guardrails validation failed: {e}")
@@ -1673,7 +1733,7 @@ class LangGraphRAGAgent:
             viz.record_node_end("retrieve_and_answer_workflow", result)
             result["visualization"] = viz.get_trace_data()
             
-            # Extract tracker data for animated visualization
+            # Extract tracker data for animated visualization (get_graph_data returns serializable dict)
             if retrieval_tracker:
                 result["workflow_graph"] = retrieval_tracker.get_graph_data()
             
@@ -1707,8 +1767,9 @@ class LangGraphRAGAgent:
             # End-user friendly: just answer, no metadata
             answer_text = result.get("answer", "")
             
-            # Extract plain text answer (answer is already extracted from JSON by answer_question_node)
-            # No need to parse JSON again, it's already been done
+            # Ensure answer is not empty - if it is, indicate no answer was generated
+            if not answer_text or answer_text.strip() == "":
+                answer_text = "No answer generated. Please try rephrasing your question."
             
             # Apply Guardrails validation for concise mode (hallucination_check + security_incident_policy)
             validation_result = self._apply_guardrails_validation(answer_text, response_mode)
@@ -1736,15 +1797,14 @@ class LangGraphRAGAgent:
             # Extract plain text answer (answer is already extracted from JSON by answer_question_node)
             answer_text = result.get("answer", "")
             
-            # Apply Guardrails validation for internal mode (hallucination_check only)
-            validation_result = self._apply_guardrails_validation(answer_text, response_mode)
-            if not validation_result.get("validated"):
-                print(f"[⚠] Guardrails validation warning: {validation_result.get('validation_error')}")
-            validated_answer = validation_result.get("answer", answer_text)
+            # Ensure answer is not empty - if it is, indicate no answer was generated
+            if not answer_text or answer_text.strip() == "":
+                answer_text = "No answer generated. Please try rephrasing your question."
             
+            # No guardrails for internal mode - system integration needs raw data
             return {
                 "success": len(result.get("errors", [])) == 0,
-                "answer": validated_answer,  # Plain text only
+                "answer": answer_text,  # Plain text only
                 "quality_score": result.get("retrieval_quality", 0.0),
                 "sources_count": len(reranked),
                 "source_docs": [{"doc_id": s.get("metadata", {}).get("doc_id") or s.get("source", "unknown"), 
@@ -1755,7 +1815,7 @@ class LangGraphRAGAgent:
                     "model": "langgraph_rag_agent",
                     "execution_time_ms": result.get("execution_time_ms", 0)
                 },
-                "guardrails_applied": validation_result.get("guardrails_applied", False),
+                "guardrails_applied": False,
                 "errors": result.get("errors", [])
             }
         else:  # verbose mode (default for engineers/admins)
@@ -2011,7 +2071,7 @@ class LangGraphRAGAgent:
                 "rbac_namespace": kwargs.get("rbac_namespace", "general"),
                 "text_columns": text_columns,
                 "metadata_columns": metadata_columns,
-                "db_path": EnvConfig.get_db_path(),
+                "db_path": EnvConfig.get_rag_db_path(),
                 "llm_service": self.llm_service,
                 "vectordb_service": self.vectordb_service,
                 "chunk_size": kwargs.get("chunk_size", chunking_config.get("chunk_size", 512)),

@@ -44,6 +44,16 @@ dependencies = [
     "tensorflow>=2.10.0",
     "joblib>=1.1.0",
     "python-dotenv>=0.19.0",
+    "chromadb>=0.3.0",
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    "langgraph>=0.1.0",
+    "langchain-text-splitters>=0.0.1",
+    "tiktoken>=0.5.0",
+    "pypdf>=3.0.0",
+    "python-docx>=0.8.11",
+    "httpx>=0.24.0",
+    "urllib3>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -55,12 +65,19 @@ dev = [
     "isort>=5.0.0",
 ]
 
+rag-llm-providers = [
+    "langchain-openai>=0.0.1",
+    "langchain-anthropic>=0.0.1",
+    "langchain-huggingface>=0.0.1",
+    "langchain-ollama>=0.0.1",
+]
+
 [project.urls]
 "Repository" = "https://github.com/sopradhan/water"
 "Bug Tracker" = "https://github.com/sopradhan/water/issues"
 
 [tool.setuptools]
-packages = ["src", "src.config", "src.data_generator", "src.model"]
+packages = ["src", "src.config", "src.data_generator", "src.model", "src.rag", "src.rag.agents", "src.rag.agents.langgraph_agent", "src.rag.agents.healing_agent", "src.rag.config", "src.rag.guardrails", "src.rag.reporting", "src.rag.tools", "src.rag.tools.services", "src.rag.pages", "src.rag.api"]
 
 [tool.setuptools.package-data]
 src = ["py.typed"]

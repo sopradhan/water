@@ -23,18 +23,36 @@ Supported Formats:
 """
 
 import json
-import pandas as pd
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from langchain_core.tools import tool
 from datetime import datetime
 
-try:
-    from docling.document_converter import DocumentConverter
-    from docling.datamodel.base_models import Document as DoclingDocument
-    HAS_DOCLING = True
-except ImportError:
-    HAS_DOCLING = False
+# Lazy import pandas - only loaded when needed
+_pandas = None
+def get_pandas():
+    global _pandas
+    if _pandas is None:
+        import pandas as pd
+        _pandas = pd
+    return _pandas
+
+# Lazy import docling - avoid hanging on pyarrow/compute on Windows
+_docling_converter = None
+_docling_document = None
+HAS_DOCLING = True
+
+def get_docling():
+    global _docling_converter, _docling_document, HAS_DOCLING
+    if _docling_converter is None:
+        try:
+            from docling.document_converter import DocumentConverter
+            from docling.datamodel.base_models import Document as DoclingDocument
+            _docling_converter = DocumentConverter
+            _docling_document = DoclingDocument
+        except ImportError:
+            HAS_DOCLING = False
+    return _docling_converter, _docling_document
 
 try:
     from docx import Document as DocxDocument
@@ -67,10 +85,7 @@ class DocumentToMarkdownConverter:
         if title:
             markdown += f"# {title}\n\n"
         
-        # Add metadata header
-        markdown += f"_Document converted to markdown on {datetime.now().isoformat()}_\n\n"
-        
-        # Preserve paragraphs
+        # Preserve paragraphs (skip metadata timestamp - it wastes embedding tokens)
         paragraphs = text.split('\n\n')
         for para in paragraphs:
             if para.strip():
@@ -101,7 +116,6 @@ class DocumentToMarkdownConverter:
             if title:
                 markdown += f"# {title}\n\n"
             
-            markdown += f"_CSV file converted to markdown table on {datetime.now().isoformat()}_\n\n"
             markdown += f"**Total Records**: {len(df)}\n\n"
             
             # Convert to markdown table
@@ -142,7 +156,6 @@ class DocumentToMarkdownConverter:
             if title:
                 markdown += f"# {title}\n\n"
             
-            markdown += f"_Excel file converted to markdown on {datetime.now().isoformat()}_\n\n"
             markdown += f"**Total Sheets**: {len(xls.sheet_names)}\n\n"
             
             for sheet in sheets:
@@ -179,17 +192,19 @@ class DocumentToMarkdownConverter:
             return "# Error: docling not installed\n\nInstall with: pip install docling"
         
         try:
+            DocumentConverter, DoclingDocument = get_docling()
+            if not DocumentConverter:
+                return "# Error: docling not available\n\nCould not import docling library"
+            
             converter = DocumentConverter()
             doc_result = converter.convert_document_or_pdf_path(pdf_path)
-            doc: DoclingDocument = doc_result.document
+            doc = doc_result.document
             
             markdown = ""
             if title:
                 markdown += f"# {title}\n\n"
             
-            markdown += f"_PDF with {len(doc.pages)} pages converted to markdown using docling on {datetime.now().isoformat()}_\n\n"
-            
-            # Extract markdown directly from docling document
+            # Extract markdown directly from docling document (skip timestamp metadata)
             markdown += doc.export_to_markdown()
             
             return markdown
@@ -212,15 +227,15 @@ class DocumentToMarkdownConverter:
             return "# Error: docling not installed\n\nInstall with: pip install docling"
         
         try:
+            DocumentConverter, DoclingDocument = get_docling()
             converter = DocumentConverter()
             doc_result = converter.convert_document_or_pdf_path(docx_path)
-            doc: DoclingDocument = doc_result.document
+            doc = doc_result.document
             
             markdown = ""
             if title:
                 markdown += f"# {title}\n\n"
             
-            markdown += f"_Word document converted to markdown using docling on {datetime.now().isoformat()}_\n\n"
             markdown += doc.export_to_markdown()
             
             return markdown
@@ -282,16 +297,19 @@ class DocumentToMarkdownConverter:
             return "# Error: docling not installed\n\nInstall with: pip install docling"
         
         try:
+            DocumentConverter, DoclingDocument = get_docling()
+            if not DocumentConverter:
+                return "# Error: docling not available\n\nCould not import docling library"
+            
             converter = DocumentConverter()
             doc_result = converter.convert_document_or_pdf_path(file_path)
-            doc: DoclingDocument = doc_result.document
+            doc = doc_result.document
             
             markdown = ""
             if title:
                 markdown += f"# {title}\n\n"
             
-            file_type = Path(file_path).suffix.lower()
-            markdown += f"_{file_type} document converted to markdown using docling on {datetime.now().isoformat()}_\n\n"
+            # Extract markdown directly (skip timestamp metadata to save embedding tokens)
             markdown += doc.export_to_markdown()
             
             return markdown
@@ -350,7 +368,6 @@ class DocumentToMarkdownConverter:
             return f"# {table_name}\n\n_Empty table_\n\n"
         
         markdown = f"# {table_name}\n\n"
-        markdown += f"_Database table converted to markdown on {datetime.now().isoformat()}_\n\n"
         markdown += f"**Total Records**: {len(table_data)}\n\n"
         
         # Convert to DataFrame for markdown table generation

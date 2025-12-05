@@ -103,7 +103,26 @@ class StatusResponse(BaseModel):
     message: Optional[str] = None
 
 
-# New Ingestion Models
+class FeedbackRequest(BaseModel):
+    """User feedback on answer quality"""
+    session_id: Optional[str] = None
+    question: str
+    answer: str
+    rating: int  # 1-5 scale
+    user_id: Optional[int] = None
+    company_id: Optional[int] = None
+    feedback_text: Optional[str] = None
+    is_helpful: Optional[bool] = None
+
+
+class FeedbackResponse(BaseModel):
+    """Response to feedback submission"""
+    success: bool
+    feedback_id: Optional[str] = None
+    message: str
+    rl_learning_applied: bool
+    rating: int
+    errors: List[str] = []
 class IngestDirectoryRequest(BaseModel):
     """Request to ingest from directory"""
     directory_path: str
@@ -464,33 +483,99 @@ async def ask_question(request: AskRequest):
                 len(result.get("sources", []))      # verbose mode (fallback)
             )
             
-            return AskResponse(
-                success=True,
-                question=request.question,
-                answer=answer,
-                response_mode=request.response_mode,
-                context_chunks=context_chunks,
-                guardrails_passed=result.get("guardrails_passed", True),
-                traceability=result.get("traceability", {}),
-                confidence_score=result.get("confidence_score"),
-                errors=result.get("errors", []),
-                workflow_graph=result.get("workflow_graph")  # Include animated workflow data
-            )
+            return {
+                "success": True,
+                "question": request.question,
+                "answer": answer,
+                "response_mode": request.response_mode,
+                "context_chunks": context_chunks,
+                "guardrails_passed": result.get("guardrails_passed", True),
+                "traceability": result.get("traceability", {}),
+                "confidence_score": result.get("confidence_score"),
+                "errors": result.get("errors", []),
+                "workflow_graph": result.get("workflow_graph")
+            }
         else:
-            return AskResponse(
-                success=False,
-                question=request.question,
-                answer="Failed to generate answer. Please check the logs.",
-                response_mode=request.response_mode,
-                context_chunks=0,
-                guardrails_passed=False,
-                errors=result.get("errors", ["Failed to generate answer"]),
-                workflow_graph=result.get("workflow_graph")  # Include animated workflow data
-            )
+            return {
+                "success": False,
+                "question": request.question,
+                "answer": "Failed to generate answer. Please check the logs.",
+                "response_mode": request.response_mode,
+                "context_chunks": 0,
+                "guardrails_passed": False,
+                "errors": result.get("errors", ["Failed to generate answer"]),
+                "workflow_graph": result.get("workflow_graph")
+            }
     
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Question processing failed: {str(e)}")
+
+
+# ============================================================================
+# Feedback & Learning Endpoints
+# ============================================================================
+
+@app.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackRequest):
+    """
+    Submit user feedback on answer quality for RL learning
+    
+    - **rating**: Quality rating from 1 (very bad) to 5 (excellent)
+    - **is_helpful**: Whether the answer was helpful (true/false)
+    - **feedback_text**: Optional detailed feedback
+    
+    This endpoint feeds user satisfaction data into the RL agent to improve
+    future answer generation and ranking strategies.
+    """
+    if agent is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    
+    try:
+        logger.info(f"Processing feedback - rating: {request.rating}, question: {request.question[:50]}")
+        
+        # Validate rating
+        if request.rating < 1 or request.rating > 5:
+            raise ValueError("Rating must be between 1 and 5")
+        
+        # Store feedback in RL agent for learning
+        feedback_data = {
+            "session_id": request.session_id,
+            "question": request.question,
+            "answer": request.answer,
+            "rating": request.rating,
+            "user_id": request.user_id,
+            "company_id": request.company_id,
+            "feedback_text": request.feedback_text,
+            "is_helpful": request.is_helpful,
+            "timestamp": __import__('time').time()
+        }
+        
+        # Feed to RL agent for learning
+        rl_learning_applied = False
+        if hasattr(agent, 'rl_agent') and agent.rl_agent:
+            try:
+                # Update RL agent with feedback signal
+                agent.rl_agent.process_feedback(feedback_data)
+                rl_learning_applied = True
+                logger.info(f"RL agent updated with feedback - rating: {request.rating}")
+            except Exception as e:
+                logger.warning(f"Failed to apply RL learning: {e}")
+        
+        return {
+            "success": True,
+            "feedback_id": f"fb_{feedback_data['timestamp']}",
+            "message": f"Feedback received - rating: {request.rating}/5",
+            "rl_learning_applied": rl_learning_applied,
+            "rating": request.rating,
+            "errors": []
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error processing feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Feedback processing failed: {str(e)}")
 
 
 # ============================================================================
@@ -698,6 +783,55 @@ async def http_exception_handler(request, exc):
         "error": exc.detail,
         "status_code": exc.status_code
     }
+
+
+@app.get("/rag-history")
+def get_rag_history(limit: int = 50, event_type: str = None):
+    """
+    Get RAG query history for analytics dashboard.
+    
+    Args:
+        limit: Number of recent records to return
+        event_type: Filter by event type (QUERY, HEAL, SYNTHETIC_TEST)
+    
+    Returns:
+        List of history records with metrics for RAGAS analysis
+    """
+    try:
+        from src.rag.rag_db_models.db_models import RAGHistoryModel
+        
+        rag_history = RAGHistoryModel()
+        
+        # Get recent records
+        query = f"SELECT * FROM rag_history_and_optimization ORDER BY timestamp DESC LIMIT ?"
+        
+        if event_type:
+            query = f"SELECT * FROM rag_history_and_optimization WHERE event_type = ? ORDER BY timestamp DESC LIMIT ?"
+            cur = rag_history.conn.execute(query, (event_type, limit))
+        else:
+            cur = rag_history.conn.execute(query, (limit,))
+        
+        rag_history.conn.row_factory = __import__('sqlite3').Row
+        records = cur.fetchall()
+        
+        # Convert to list of dicts with all fields
+        history_list = []
+        for record in records:
+            record_dict = dict(record)
+            history_list.append(record_dict)
+        
+        return {
+            "status": "success",
+            "count": len(history_list),
+            "records": history_list
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "records": []
+        }
 
 
 if __name__ == "__main__":

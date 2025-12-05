@@ -1,36 +1,102 @@
 """
 Vector Database Service - ChromaDB abstraction
-Provides unified interface for vector operations
+Provides unified interface for vector operations with configurable backend
 """
 import chromadb
-from chromadb import PersistentClient
+from chromadb import PersistentClient, HttpClient
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+import os
 
 
 class VectorDBService:
-    """ChromaDB vector database service for REFRAG system"""
+    """ChromaDB vector database service for Water Anomaly Detection RAG
     
-    def __init__(self, persist_directory: str, collection_name: str = "rag_embeddings"):
+    Supports two modes:
+    1. Local mode: ChromaDB persistence directory at src/data/RAG/chroma_db
+    2. Server mode: Remote ChromaDB server via HTTP (for external hosting)
+    """
+    
+    def __init__(self, persist_directory: Optional[str] = None, 
+                 collection_name: str = "water_anomaly_detection",
+                 server_url: Optional[str] = None):
         """
         Initialize vector database service
         
         Args:
-            persist_directory: Path to ChromaDB persistence directory
+            persist_directory: Path to ChromaDB persistence directory (local mode)
+                             If None and server_url is None, uses src/data/RAG/chroma_db
             collection_name: Name of the collection to use
+            server_url: URL for remote ChromaDB server (e.g., http://localhost:8000)
+                       If provided, connects to server instead of local persistence
         """
+        # Determine which mode to use
+        if server_url:
+            # Server mode: Connect to remote ChromaDB server
+            self._init_server_mode(server_url, collection_name)
+        else:
+            # Local mode: Use ChromaDB persistence directory
+            if persist_directory is None:
+                # Use default RAG directory
+                persist_directory = self._get_default_persist_dir()
+            self._init_local_mode(persist_directory, collection_name)
+        
+        self.collection_name = collection_name
+        print(f"[VectorDBService] Collection '{collection_name}' ready")
+        print(f"[VectorDBService] Current document count: {self.collection.count()}")
+    
+    @staticmethod
+    def _get_default_persist_dir() -> str:
+        """Get default persistence directory from environment or use src/data/RAG"""
+        # Try to get from environment variable first
+        persist_dir = os.getenv('CHROMA_DB_PATH')
+        if persist_dir:
+            return persist_dir
+        
+        # Fall back to default: src/data/RAG/chroma_db
+        # Get project root and construct path
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parent.parent.parent.parent
+        default_path = str(project_root / "src" / "data" / "RAG" / "chroma_db")
+        return default_path
+    
+    def _init_local_mode(self, persist_directory: str, collection_name: str):
+        """Initialize ChromaDB in local persistence mode"""
+        # Create directory if it doesn't exist
         Path(persist_directory).mkdir(parents=True, exist_ok=True)
         
-        self.persist_directory = persist_directory  # Store for later use
+        self.persist_directory = persist_directory
+        self.server_url = None
+        self.mode = "local"
+        
+        # Initialize ChromaDB with persistence
         self.client = PersistentClient(path=persist_directory)
-        self.collection_name = collection_name
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"}
         )
         
-        print(f"[VectorDBService] Collection '{collection_name}' ready")
-        print(f"[VectorDBService] Current document count: {self.collection.count()}")
+        print(f"[VectorDBService] Local mode - Persistence directory: {persist_directory}")
+    
+    def _init_server_mode(self, server_url: str, collection_name: str):
+        """Initialize ChromaDB in server mode (connect to remote instance)"""
+        self.persist_directory = None
+        self.server_url = server_url
+        self.mode = "server"
+        
+        # Connect to remote ChromaDB server
+        try:
+            self.client = HttpClient(host=server_url.split("://")[-1].split(":")[0],
+                                     port=int(server_url.split(":")[-1]) if ":" in server_url else 8000)
+            self.collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            print(f"[VectorDBService] Server mode - Connected to: {server_url}")
+        except Exception as e:
+            print(f"[ERROR] Failed to connect to server: {server_url}")
+            print(f"[ERROR] {e}")
+            raise
     
     def add_documents(self, ids: List[str], metadatas: List[Dict], documents: List[str],
                      embeddings: Optional[List[List[float]]] = None):

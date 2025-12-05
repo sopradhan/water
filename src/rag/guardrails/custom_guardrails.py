@@ -172,6 +172,30 @@ class CustomGuardrails:
         
         return output
     
+    def generate_safety_explanation(self, reason: str, blocked_content: str = None) -> str:
+        """
+        Generate a user-friendly explanation when content is blocked by guardrails.
+        
+        Args:
+            reason: The safety reason (e.g., "excessive_repetition", "blocked_keyword")
+            blocked_content: The content that was blocked (for context)
+        
+        Returns:
+            User-friendly explanation string
+        """
+        explanations = {
+            "Model generated empty output": "Unable to generate a response. Please try rephrasing your question.",
+            "Output contains excessive repetition": "The response contains repetitive content which may indicate a system issue. Please try a different question.",
+            "Output contains blocked keyword": "The response contains content that cannot be shared. Please try a different question or contact support.",
+            "PII detected": "The response contains personal information that cannot be shared. Please ask a different question.",
+        }
+        
+        for key, value in explanations.items():
+            if key in reason:
+                return value
+        
+        return f"We cannot provide this information due to safety restrictions: {reason}. Please try a different question."
+    
     def process_request(self, user_input: str, llm_output: str) -> Dict:
         """
         Complete guardrails pipeline: validate input -> check safety -> filter output.
@@ -199,7 +223,10 @@ class CustomGuardrails:
             'output_errors': [],
             'pii_detected': {},
             'filtered_output': None,
-            'message': None
+            'message': None,
+            'content_blocked': False,
+            'block_reason': None,
+            'safety_explanation': None
         }
         
         # Step 1: Validate input
@@ -215,12 +242,15 @@ class CustomGuardrails:
         # Step 2: Check output safety
         is_safe, error = self.check_output_safety(llm_output)
         if not is_safe:
-            result['success'] = False
+            # Mark content as blocked and generate explanation
+            result['content_blocked'] = True
+            result['block_reason'] = error
+            result['safety_explanation'] = self.generate_safety_explanation(error, llm_output)
             result['is_safe'] = False
             result['safety_level'] = 'blocked'
             result['output_errors'] = [error]
             result['message'] = f"Output validation failed: {error}"
-            return result
+            # Continue to PII detection and filtering instead of returning early
         
         # Step 3: Detect PII
         pii_found = self.detect_pii(llm_output)
@@ -234,9 +264,17 @@ class CustomGuardrails:
         filtered_output = self.filter_output(llm_output)
         result['filtered_output'] = filtered_output
         
+        # IMPORTANT: If safety check failed but we reached here, still mark success as False
+        # so caller can be aware, but always provide filtered_output for use
+        if not result['is_safe']:
+            result['success'] = False
+        
         # Final message
         if result['pii_detected']:
             result['message'] = f"Response filtered (PII redacted: {list(result['pii_detected'].keys())})"
+        elif not result['is_safe']:
+            # Already has message from safety check failure
+            pass
         else:
             result['message'] = "Response validated and safe"
         

@@ -41,10 +41,11 @@ from .document_classification_tool import (
     DocumentClassificationAgent,
 )
 
-from .document_markdown_converter import (
-    convert_to_markdown_tool,
-    DocumentToMarkdownConverter,
-)
+# NOTE: document_markdown_converter is lazily imported to avoid heavy docling dependencies at startup
+# from .document_markdown_converter import (
+#     convert_to_markdown_tool,
+#     DocumentToMarkdownConverter,
+# )
 
 from .rbac_retrieval_tool import (
     retrieve_with_rbac_tool,
@@ -94,9 +95,9 @@ __all__ = [
     'enhance_document_metadata_tool',       # Auto-classify intent, dept, role, sensitivity
     'DocumentClassificationAgent',          # Meta-prompting classifier
     
-    # Universal Markdown Conversion (Docling-parse powered)
-    'convert_to_markdown_tool',             # Convert any format to markdown
-    'DocumentToMarkdownConverter',          # Universal converter class
+    # Universal Markdown Conversion (Docling-parse powered - LAZY IMPORT)
+    # 'convert_to_markdown_tool',             # Convert any format to markdown (lazy import)
+    # 'DocumentToMarkdownConverter',          # Universal converter class (lazy import)
     
     # RBAC-Aware Retrieval (3 response modes + access control)
     'retrieve_with_rbac_tool',              # RBAC-filtered retrieval

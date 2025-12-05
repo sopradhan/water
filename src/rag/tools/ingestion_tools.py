@@ -5,9 +5,52 @@ import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Union
 from langchain_core.tools import tool
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Assuming relative imports for configuration and database models
-from ..config.env_config import EnvConfig 
+from ..config.env_config import EnvConfig
+
+# ============================================================================
+# LIGHTWEIGHT TEXT SPLITTER - No TensorFlow/transformers dependency
+# ============================================================================
+class SimpleRecursiveTextSplitter:
+    """Simple recursive text splitter without transformers dependency."""
+    
+    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50, 
+                 separators: List[str] = None):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.separators = separators or ["\n\n##", "\n\n", "\n", ". ", " ", ""]
+    
+    def split_text(self, text: str) -> List[str]:
+        """Recursively split text by separators."""
+        chunks = []
+        if len(text) <= self.chunk_size:
+            return [text]
+        
+        # Try each separator
+        for sep in self.separators:
+            if sep in text:
+                splits = text.split(sep)
+                # Recursively process each split
+                for split in splits:
+                    if len(split) > self.chunk_size:
+                        chunks.extend(self.split_text(split))
+                    else:
+                        chunks.append(split)
+                
+                # Merge chunks with overlap
+                merged = []
+                for chunk in chunks:
+                    if chunk:
+                        if merged and len(merged[-1] + sep + chunk) <= self.chunk_size + self.chunk_overlap:
+                            merged[-1] += sep + chunk
+                        else:
+                            merged.append(chunk)
+                return merged
+        
+        # Fallback: just split by character
+        return [text[i:i+self.chunk_size] for i in range(0, len(text), self.chunk_size - self.chunk_overlap)]
+
+RecursiveCharacterTextSplitter = SimpleRecursiveTextSplitter 
 
 # --- Optional Document Extraction Libraries ---
 try:
@@ -659,7 +702,7 @@ def update_metadata_tracking_tool(doc_id: str, source_path: str, rbac_namespace:
         str: JSON with 'success' status and tags. Example: {"success": true, "rbac_tags": [...], "meta_tags": [...]}
     """
     try:
-        rag_db_path = EnvConfig.get_db_path()
+        rag_db_path = EnvConfig.get_rag_db_path()
         rag_conn = sqlite3.connect(rag_db_path)
         
         # Attempted import for model - gracefully handle if unavailable

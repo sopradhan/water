@@ -194,11 +194,6 @@ def answer_question_tool(question: str, context: str, llm_service, rbac_context:
         context_data = json.loads(context) if isinstance(context, str) else context
         context_texts = context_data.get('reranked_context', [])
         
-        # DEBUG: Print what we received
-        print(f"[DEBUG ANSWER] Received context type: {type(context_data)}")
-        print(f"[DEBUG ANSWER] Context keys: {list(context_data.keys()) if isinstance(context_data, dict) else 'N/A'}")
-        print(f"[DEBUG ANSWER] Number of reranked items: {len(context_texts)}")
-        
         # ========================================================================
         # MULTI-LEVEL CONFIDENCE ANALYSIS (Embedding + Keywords + Meta-Tags)
         # ========================================================================
@@ -215,8 +210,6 @@ def answer_question_tool(question: str, context: str, llm_service, rbac_context:
             # The reranked_context already has relevance_score from vector similarity
             embedding_scores = [c.get('metadata', {}).get('relevance_score', 0.5) for c in context_texts]
             embedding_confidence = sum(embedding_scores) / len(embedding_scores) if embedding_scores else 0.5
-            print(f"[DEBUG CONFIDENCE] Embedding scores: {embedding_scores}")
-            print(f"[DEBUG CONFIDENCE] Average embedding confidence: {embedding_confidence:.3f}")
             
             # Level 2: KEYWORD MATCHING (exact word overlap)
             if rl_agent:
@@ -229,10 +222,6 @@ def answer_question_tool(question: str, context: str, llm_service, rbac_context:
                 question_meta_tags = rl_agent.extract_meta_tags(question)
                 meta_tag_confidence = rl_agent.calculate_meta_tag_confidence(question_meta_tags, context_meta_tags)
                 
-                print(f"[DEBUG CONFIDENCE] Keyword match score: {keyword_match_score:.3f}")
-                print(f"[DEBUG CONFIDENCE] Meta-tag confidence: {meta_tag_confidence:.3f}")
-                print(f"[DEBUG CONFIDENCE] Missing keywords: {missing_keywords}")
-                print(f"[DEBUG CONFIDENCE] Context tags: {context_meta_tags}, Question tags: {question_meta_tags}")
             
             # Combined confidence: Weight all three factors
             # Embedding similarity is most important (if ChromaDB found it, it's relevant)
@@ -241,8 +230,6 @@ def answer_question_tool(question: str, context: str, llm_service, rbac_context:
                 0.3 * meta_tag_confidence +       # 30% - Semantic domain matching
                 0.2 * keyword_match_score        # 20% - Exact keyword overlap (least important, can be low for synonyms)
             )
-            print(f"[DEBUG CONFIDENCE] Combined confidence: {combined_confidence:.3f}")
-            print(f"[DEBUG CONFIDENCE] Formula: (0.5 * {embedding_confidence:.3f}) + (0.3 * {meta_tag_confidence:.3f}) + (0.2 * {keyword_match_score:.3f}) = {combined_confidence:.3f}")
         
         # ========================================================================
         # LOW CONFIDENCE FALLBACK: ASK USER FOR CLARIFICATION
@@ -251,7 +238,6 @@ def answer_question_tool(question: str, context: str, llm_service, rbac_context:
         # (Don't reject just because keywords don't match - synonyms won't match)
         if embedding_confidence < 0.4 and meta_tag_confidence < 0.4:
             # Both vector similarity AND semantic domain are weak - likely irrelevant
-            print(f"[DEBUG ANSWER] LOW CONFIDENCE DETECTED: embedding={embedding_confidence:.3f}, meta={meta_tag_confidence:.3f}")
             
             # Generate clarification request
             clarification_message = f"""I found some documents, but they don't seem to match your question well.
@@ -332,9 +318,6 @@ Keep the message concise and helpful."""
         relevance_scores = [c.get('metadata', {}).get('relevance_score', 0) for c in context_texts]
         avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
         
-        # DEBUG: Print relevance info
-        print(f"[DEBUG ANSWER] Relevance scores: {relevance_scores}")
-        print(f"[DEBUG ANSWER] Average relevance: {avg_relevance:.3f}")
         
         # If average relevance is very low, add warning to prompt
         low_relevance_warning = ""

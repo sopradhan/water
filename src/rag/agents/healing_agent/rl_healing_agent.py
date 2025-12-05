@@ -609,6 +609,99 @@ Return as JSON like: ["location", "operations"]
             )[0] if any(s['count'] > 0 for s in self.action_history.values()) else 'N/A'
         }
     
+    def process_feedback(self, feedback_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process user feedback and update RL learning
+        
+        Args:
+            feedback_data: Dictionary containing:
+                - rating: 1-5 user satisfaction rating
+                - question: Original user question
+                - answer: Generated answer
+                - user_id: User identifier
+                - timestamp: Feedback submission time
+                - session_id (optional): Session identifier
+                - feedback_text (optional): Additional user comments
+        
+        Returns:
+            Dictionary with processing result and learning metrics
+        """
+        try:
+            # Convert rating (1-5) to reward signal (0-1)
+            # 1-2: poor (reward 0.0-0.3), 3: neutral (0.5), 4-5: good (0.7-1.0)
+            rating = feedback_data.get('rating', 3)
+            if rating < 1 or rating > 5:
+                rating = 3
+            
+            reward = (rating - 1) / 4.0  # Converts 1-5 scale to 0-1 scale
+            
+            # Extract session ID
+            session_id = feedback_data.get('session_id', f"feedback_{feedback_data.get('user_id', 'unknown')}_{datetime.now().timestamp()}")
+            
+            # Log feedback to database
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                feedback_json = json.dumps({
+                    'rating': rating,
+                    'feedback_text': feedback_data.get('feedback_text', ''),
+                    'question': feedback_data.get('question', ''),
+                    'answer_length': len(feedback_data.get('answer', '')),
+                    'user_id': feedback_data.get('user_id', 'unknown')
+                })
+                
+                cursor.execute("""
+                    INSERT INTO rag_history_and_optimization
+                    (event_type, timestamp, action_taken, reward_signal, context_json, agent_id, session_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    'FEEDBACK',
+                    datetime.now().isoformat(),
+                    'USER_RATING',
+                    reward,
+                    feedback_json,
+                    'rl_healing_agent',
+                    session_id
+                ))
+                
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"[FEEDBACK] Warning: Failed to log feedback: {e}")
+            
+            # Update action history with feedback signal
+            if 'USER_RATING' not in self.action_history:
+                self.action_history['USER_RATING'] = {
+                    'count': 0,
+                    'total_reward': 0,
+                    'avg_reward': 0
+                }
+            
+            stats = self.action_history['USER_RATING']
+            stats['count'] += 1
+            stats['total_reward'] += reward
+            stats['avg_reward'] = stats['total_reward'] / stats['count']
+            
+            return {
+                'success': True,
+                'feedback_id': session_id,
+                'rating': rating,
+                'reward_signal': round(reward, 4),
+                'learning_updated': True,
+                'feedback_count': stats['count'],
+                'avg_feedback_reward': round(stats['avg_reward'], 4),
+                'rl_learning_applied': True
+            }
+        
+        except Exception as e:
+            print(f"[FEEDBACK] Error processing feedback: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'rl_learning_applied': False
+            }
+    
     def recommend_healing(self, doc_id: str, current_quality: float) -> Dict[str, Any]:
         """
         Get healing recommendation for a specific document
@@ -708,13 +801,62 @@ Return as JSON like: ["location", "operations"]
         }
         
         return reasons.get(action.action, "Action selected based on learning history.")
+    
+    def observe_reward(self, action: RLAction, reward: float, session_id: str) -> Dict[str, Any]:
+        """
+        Observe actual reward from action execution and update learning
+        
+        Args:
+            action: The action that was taken (RLAction)
+            reward: Actual reward achieved (0-1 scale)
+            session_id: Session identifier for tracking
+        
+        Returns:
+            Dictionary with learning update status
+        """
+        try:
+            # Update action statistics
+            if action.action not in self.action_history:
+                self.action_history[action.action] = {
+                    'count': 0,
+                    'total_reward': 0,
+                    'avg_reward': 0
+                }
+            
+            stats = self.action_history[action.action]
+            stats['count'] += 1
+            stats['total_reward'] += reward
+            stats['avg_reward'] = stats['total_reward'] / stats['count']
+            
+            # Decay epsilon (explore less over time)
+            self.epsilon = max(0.05, self.epsilon * 0.995)
+            
+            # Log to database
+            self._log_rl_decision(action, reward, session_id)
+            
+            return {
+                'success': True,
+                'action': action.action,
+                'reward': round(reward, 4),
+                'avg_reward': round(stats['avg_reward'], 4),
+                'action_count': stats['count'],
+                'epsilon': round(self.epsilon, 4)
+            }
+        except Exception as e:
+            print(f"[OBSERVE] Error recording reward: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
 
 
 def example_usage():
     """Example of how to use the RL Healing Agent"""
+    from ..config.env_config import EnvConfig
     
     # Initialize agent
-    db_path = "src/database/data/incident_iq.db"
+    db_path = EnvConfig.get_rag_db_path()
     agent = RLHealingAgent(db_path)
     
     # Get recommendation

@@ -6,16 +6,13 @@ from pathlib import Path
 load_dotenv()
 
 class EnvConfig:
-    """Load configuration from environment variables
+    """Load configuration for Water Anomaly Detection RAG System
     
     Database Strategy:
-    - KB_DB_PATH / connection_string_env in data_sources.json: Knowledge base database (incident_iq.db) 
-      READ ONLY during ingestion - used to read: incidents, knowledge_base, resource tables
-      NOT used for: metadata storage, embedding storage
-    - DB_PATH (rag.db): Internal RAG metadata and embeddings storage
-      Used for: query logs, document tracking, agent memory
-      NOT used for: reading source data
-    - CHROMA_DB_PATH: Vector embeddings store
+    - SQLite DB: Local metadata storage at src/data/RAG/rag_metadata.db
+      Used for: Document tracking, query logs, agent memory, audit trails
+    - ChromaDB: Local vector database at src/data/RAG/chroma_db
+      Used for: Semantic embeddings and similarity search
     """
     
     @staticmethod
@@ -26,17 +23,10 @@ class EnvConfig:
         return current_file.parent.parent.parent.parent
     
     @staticmethod
-    def get_kb_db_path() -> str:
-        """Get knowledge base database path (for reading source data during ingestion)
-        Default: reads from data_sources.json connection_string_env or uses incident_iq.db
-        """
-        return os.getenv('KB_DB_PATH', 'incident_iq.db')
-    
-    @staticmethod
-    def get_db_path() -> str:
-        """Get RAG metadata database path (for internal metadata, embeddings tracking)"""
-        # Use absolute path from project root to prevent working directory confusion
-        path = os.getenv('DB_PATH', 'src/database/data/incident_iq.db')
+    def get_rag_db_path() -> str:
+        """Get SQLite database path for RAG metadata storage"""
+        # Use absolute path from project root
+        path = os.getenv('RAG_DB_PATH', 'src/data/RAG/rag_metadata.db')
         if not os.path.isabs(path):
             project_root = EnvConfig._get_project_root()
             path = str(project_root / path)
@@ -44,9 +34,12 @@ class EnvConfig:
     
     @staticmethod
     def get_chroma_db_path() -> str:
-        """Get ChromaDB vector store path"""
-        # Fetch path directly from EnvConfig
-        path = EnvConfig.get_chroma_db_path()
+        """Get ChromaDB persistence path for local vector database"""
+        # Use absolute path from project root
+        path = os.getenv('CHROMA_DB_PATH', 'src/data/RAG/chroma_db')
+        if not os.path.isabs(path):
+            project_root = EnvConfig._get_project_root()
+            path = str(project_root / path)
         return path
     
     @staticmethod
@@ -66,5 +59,7 @@ class EnvConfig:
     
     @staticmethod
     def get_log_level() -> str:
+        """Get logging level"""
+        return os.getenv('LOG_LEVEL', 'info')
         """Get logging level"""
         return os.getenv('LOG_LEVEL', 'info')

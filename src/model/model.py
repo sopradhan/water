@@ -103,7 +103,7 @@ def train_models():
 
     config.MODEL_WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(knn, config.KNN_MODEL_FILE)
-    print(f"✓ Saved KNN model to {config.KNN_MODEL_FILE}")
+    print(f"[OK] Saved KNN model to {config.KNN_MODEL_FILE}")
 
     # -------- RNN Model (LSTM) --------
     print("\n" + "=" * 50)
@@ -154,7 +154,7 @@ def train_models():
     print("LSTM Classification Report:\n", classification_report(y_test, y_rnn_classes))
 
     lstm_model.save(config.LSTM_MODEL_FILE)
-    print(f"✓ Saved LSTM model to {config.LSTM_MODEL_FILE}")
+    print(f"[OK] Saved LSTM model to {config.LSTM_MODEL_FILE}")
 
     # -------- Confusion Matrices --------
     print("\n" + "=" * 50)
@@ -167,7 +167,7 @@ def train_models():
     joblib.dump(scaler, config.SCALER_FILE)
     joblib.dump(label_encoders, config.LABEL_ENCODERS_FILE)
     joblib.dump(target_le, config.TARGET_ENCODER_FILE)
-    print(f"\n✓ Saved preprocessing objects")
+    print(f"\n[OK] Saved preprocessing objects")
     print(f"  - Scaler: {config.SCALER_FILE}")
     print(f"  - Label Encoders: {config.LABEL_ENCODERS_FILE}")
     print(f"  - Target Encoder: {config.TARGET_ENCODER_FILE}")
