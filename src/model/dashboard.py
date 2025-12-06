@@ -182,7 +182,8 @@ def create_3d_scatter(df_numeric, features=None):
             showscale=True,
             colorbar=dict(title=features[0])
         ),
-        text=[f"{feat}: {val:.2f}" for feat, val in zip(features, data_normalized)],
+        text=[f"{features[0]}: {x:.2f}<br>{features[1]}: {y:.2f}<br>{features[2]}: {z:.2f}" 
+              for x, y, z in zip(data_normalized[:, 0], data_normalized[:, 1], data_normalized[:, 2])],
         hovertemplate='%{text}<extra></extra>'
     )])
     
@@ -367,15 +368,13 @@ def detect_anomalies(df_numeric):
 # ============================================================================
 # MAIN APP LAYOUT
 # ============================================================================
-
 def main():
     # Sidebar navigation
     st.sidebar.title("[DASHBOARD] Navigation")
     page = st.sidebar.radio(
         "Select Page:",
         ["Overview", "Exploratory Analysis", "Feature Engineering", 
-         "Statistical Analysis", "Advanced Visualizations", "Model Retraining"],
-        icon_position="left"
+         "Statistical Analysis", "Advanced Visualizations", "Model Retraining"]
     )
     
     # Load data
