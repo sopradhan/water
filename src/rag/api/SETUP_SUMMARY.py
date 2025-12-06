@@ -206,13 +206,13 @@ if __name__ == "__main__":
     print(STRUCTURE)
     
     print("\n" + "=" * 80)
-    print("🚀 QUICK START")
+    print("[START] QUICK START")
     print("=" * 80)
     print(f"\n{COMMAND_START_ALL}")
     print(f"Or just: python -m src.rag.api.startup\n")
     
     print("=" * 80)
-    print("🌐 URLs")
+    print("[URLS] URLs")
     print("=" * 80)
     for name, url in URLS.items():
         print(f"  {name}: {url}")

@@ -2,6 +2,11 @@
 RAG Evaluation Module - RAGAS Integration
 """
 
+RAGAS_AVAILABLE = False
+RAGASEvaluator = None
+RAGASScore = None
+get_ragas_evaluator = None
+
 try:
     from .ragas_evaluator import (
         RAGASEvaluator,
@@ -9,7 +14,7 @@ try:
         get_ragas_evaluator,
         RAGAS_AVAILABLE
     )
-except (ImportError, Exception) as e:
+except ImportError as e:
     # RAGAS dependencies may not be available
     print(f"[WARNING] RAGAS evaluation module not available: {e}")
     RAGAS_AVAILABLE = False

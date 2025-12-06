@@ -1,0 +1,25 @@
+"""
+Dashboard Requirements
+Install these packages for the water anomaly detection dashboard
+"""
+
+# Core dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.17.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Data science
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Existing project dependencies (ensure compatibility)
+tensorflow>=2.13.0
+joblib>=1.3.0
+chromadb>=0.3.0
+langchain>=0.0.300
+faiss-cpu>=1.7.0

@@ -64,32 +64,32 @@ class TruthfulnessValidator:
         # Level 1: SOURCE ALIGNMENT - Does answer contain information from source?
         source_alignment = self._check_source_alignment(answer, context_texts)
         if source_alignment < 0.3:
-            reasons.append("❌ Answer content not found in source documents")
+            reasons.append("[FAIL] Answer content not found in source documents")
             suggestions.append("Answer may be hallucinated - check source texts")
         elif source_alignment > 0.7:
-            reasons.append("✅ Answer well-grounded in source documents")
+            reasons.append("[OK] Answer well-grounded in source documents")
         else:
-            reasons.append("⚠️ Answer partially grounded in sources")
+            reasons.append("[PARTIAL] Answer partially grounded in sources")
         
         # Level 2: SEMANTIC COHERENCE - Does answer actually address the question?
         semantic_coherence = self._check_semantic_coherence(question, answer)
         if semantic_coherence < 0.4:
-            reasons.append("❌ Answer doesn't address the question")
+            reasons.append("[FAIL] Answer doesn't address the question")
             suggestions.append("Reframe the answer to directly address: " + question[:50])
         elif semantic_coherence > 0.8:
-            reasons.append("✅ Answer directly addresses the question")
+            reasons.append("[OK] Answer directly addresses the question")
         else:
-            reasons.append("⚠️ Answer partially addresses the question")
+            reasons.append("[PARTIAL] Answer partially addresses the question")
         
         # Level 3: FACTUAL CONSISTENCY - Is answer internally consistent?
         factual_consistency = self._check_factual_consistency(answer, context_texts)
         if factual_consistency < 0.5:
-            reasons.append("❌ Answer contains contradictions or inconsistencies")
+            reasons.append("[FAIL] Answer contains contradictions or inconsistencies")
             suggestions.append("Verify facts and remove contradictory statements")
         elif factual_consistency > 0.8:
-            reasons.append("✅ Answer is internally consistent")
+            reasons.append("[OK] Answer is internally consistent")
         else:
-            reasons.append("⚠️ Answer has some internal inconsistencies")
+            reasons.append("[PARTIAL] Answer has some internal inconsistencies")
         
         # Level 4: COMBINED TRUTHFULNESS SCORE
         # Weight factors: source alignment (40%), semantic coherence (35%), factual consistency (25%)
@@ -114,8 +114,8 @@ class TruthfulnessValidator:
             confidence_level = "LOW"
         
         # Add meta-reasoning
-        reasons.insert(0, f"📊 Truthfulness Score: {overall_score:.1%}")
-        reasons.append(f"📈 Embedding confidence: {embedding_confidence:.1%}")
+        reasons.insert(0, f"[SCORE] Truthfulness Score: {overall_score:.1%}")
+        reasons.append(f"[INFO] Embedding confidence: {embedding_confidence:.1%}")
         
         return TruthfulnessScore(
             overall_score=overall_score,

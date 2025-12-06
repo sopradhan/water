@@ -104,7 +104,8 @@ class LangGraphRAGAgent:
         self.ingestion_graph = self._build_ingestion_graph()
         self.retrieval_graph = self._build_retrieval_graph()
         self.optimization_graph = self._build_optimization_graph()
-        self.custom_guardrails = CustomGuardrails()
+        # Pass LLM service to guardrails for intelligent response generation when blocked
+        self.custom_guardrails = CustomGuardrails(llm_service=self.llm_service)
     
     def _init_services(self):
         """Initialize services using environment configuration."""
@@ -1220,12 +1221,10 @@ class LangGraphRAGAgent:
                     except Exception as e:
                         if show_debug:
                             print(f"[⚠] RAGAS evaluation failed: {e}")
+                        state["ragas_scores"] = {}
                 else:
                     if show_debug:
                         print(f"[⚠] RAGAS evaluation not available")
-                
-                    if show_debug:
-                        print(f"  [RAGAS] Evaluation skipped: {e}")
                     state["ragas_scores"] = {}
                 
                 # End RAGAS evaluation
@@ -1610,13 +1609,18 @@ class LangGraphRAGAgent:
             "workflow_graph": tracker_data  # Include animation data
         }
 
-    def _apply_guardrails_validation(self, answer: str, response_mode: str) -> Dict[str, Any]:
+    def _apply_guardrails_validation(self, answer: str, response_mode: str, question: str = "") -> Dict[str, Any]:
         """Apply custom guardrails validation based on response mode.
         
         Uses CustomGuardrails for all response modes:
-        - concise: Full validation (user-friendly)
+        - concise: Full validation with repetition check SKIPPED for Q&A (user-friendly)
         - internal: Hallucination & safety checks (system integration)
         - verbose: Basic safety only (engineers need raw data)
+        
+        Args:
+            answer: The generated answer to validate
+            response_mode: Response mode (concise, verbose, internal)
+            question: The original user question (for intelligent response generation when blocked)
         """
         if response_mode == "verbose":
             # No validation for verbose mode - engineers need full debug info
@@ -1628,12 +1632,16 @@ class LangGraphRAGAgent:
         
         try:
             # Use CustomGuardrails for all modes
+            # Skip repetition check for knowledge base Q&A answers (default=True)
+            # because legitimate answers naturally have repeated articles/prepositions
+            # Pass question for intelligent response generation when content is blocked
             validation_result = self.custom_guardrails.process_request(
-                user_input="",  # No user input validation needed here
-                llm_output=answer
+                user_input=question,  # Pass question for context in intelligent responses
+                llm_output=answer,
+                skip_repetition_check=True  # Don't block Q&A answers with repeated function words
             )
             
-            # If content is blocked, use the safety explanation instead of the original answer
+            # If content is blocked, use the intelligent safety explanation instead of the original answer
             if validation_result.get('content_blocked'):
                 filtered = validation_result.get('safety_explanation', 'Unable to provide this information due to safety restrictions.')
             else:
@@ -1772,7 +1780,8 @@ class LangGraphRAGAgent:
                 answer_text = "No answer generated. Please try rephrasing your question."
             
             # Apply Guardrails validation for concise mode (hallucination_check + security_incident_policy)
-            validation_result = self._apply_guardrails_validation(answer_text, response_mode)
+            # Pass question for intelligent response generation when content is blocked
+            validation_result = self._apply_guardrails_validation(answer_text, response_mode, question)
             if not validation_result.get("validated"):
                 print(f"[⚠] Guardrails validation warning: {validation_result.get('validation_error')}")
             validated_answer = validation_result.get("answer", answer_text)

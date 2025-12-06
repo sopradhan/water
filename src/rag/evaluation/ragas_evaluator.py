@@ -30,7 +30,8 @@ try:
     from ragas.llm.base import LangchainLLMWrapper
     from ragas.embeddings.base import LangchainEmbeddingsWrapper
     RAGAS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    print(f"[WARNING] RAGAS not available: {e}")
     RAGAS_AVAILABLE = False
 
 

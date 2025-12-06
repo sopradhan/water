@@ -25,8 +25,14 @@ class SafetyLevel(Enum):
 class CustomGuardrails:
     """Simple guardrails for RAG system without external dependencies."""
     
-    def __init__(self):
-        """Initialize guardrails with patterns and thresholds."""
+    def __init__(self, llm_service=None):
+        """Initialize guardrails with patterns and thresholds.
+        
+        Args:
+            llm_service: Optional LLM service for generating intelligent responses when blocked.
+                         If provided, will generate contextual explanations instead of generic messages.
+        """
+        self.llm_service = llm_service
         # Harmful patterns to detect in input
         self.harmful_patterns = [
             r'(?i)(password|secret|api.?key|token|credential)',
@@ -106,12 +112,13 @@ class CustomGuardrails:
         
         return findings
     
-    def check_output_safety(self, output: str) -> Tuple[bool, Optional[str]]:
+    def check_output_safety(self, output: str, skip_repetition_check: bool = False) -> Tuple[bool, Optional[str]]:
         """
         Verify output safety before returning to user.
         
         Args:
             output: LLM generated output
+            skip_repetition_check: If True, skip repetition validation (for Q&A answers)
         
         Returns:
             (is_safe, error_message)
@@ -125,14 +132,16 @@ class CustomGuardrails:
             pass
         
         # Check for repetition (could indicate loop or error)
-        words = output.split()
-        unique_words = len(set(words))
-        total_words = len(words)
-        
-        if total_words > 10:  # Only check if enough content
-            unique_ratio = unique_words / total_words
-            if unique_ratio < self.repetition_threshold:
-                return False, f"Output contains excessive repetition (only {unique_ratio*100:.1f}% unique words)"
+        # SKIP for Q&A answers as they naturally have repeated articles/prepositions
+        if not skip_repetition_check:
+            words = output.split()
+            unique_words = len(set(words))
+            total_words = len(words)
+            
+            if total_words > 10:  # Only check if enough content
+                unique_ratio = unique_words / total_words
+                if unique_ratio < self.repetition_threshold:
+                    return False, f"Output contains excessive repetition (only {unique_ratio*100:.1f}% unique words)"
         
         # Check for harmful keywords in output
         output_lower = output.lower()
@@ -172,17 +181,41 @@ class CustomGuardrails:
         
         return output
     
-    def generate_safety_explanation(self, reason: str, blocked_content: str = None) -> str:
+    def generate_safety_explanation(self, reason: str, blocked_content: str = None, user_question: str = None) -> str:
         """
         Generate a user-friendly explanation when content is blocked by guardrails.
+        
+        Uses LLM to generate intelligent, contextual responses if available.
+        Falls back to generic explanations if LLM not available.
         
         Args:
             reason: The safety reason (e.g., "excessive_repetition", "blocked_keyword")
             blocked_content: The content that was blocked (for context)
+            user_question: Original user question (for context)
         
         Returns:
-            User-friendly explanation string
+            User-friendly explanation string (either LLM-generated or generic)
         """
+        # Try to generate intelligent response using LLM
+        if self.llm_service and user_question:
+            try:
+                # Create a prompt for LLM to generate intelligent explanation
+                explanation_prompt = f"""The system blocked a response to the user's question due to a safety concern.
+
+User Question: "{user_question}"
+Reason: {reason}
+
+Generate a brief, helpful, and professional response explaining why we cannot provide the answer and suggest how the user could ask differently or what they might try instead. Keep it to 1-2 sentences maximum.
+Response should be empathetic and helpful, not judgmental."""
+                
+                intelligent_response = self.llm_service.generate_response(explanation_prompt)
+                if intelligent_response and intelligent_response.strip():
+                    return intelligent_response.strip()
+            except Exception as e:
+                # Fall through to generic explanation if LLM generation fails
+                print(f"[DEBUG] LLM explanation generation failed: {e}, using generic explanation")
+        
+        # Generic explanations as fallback
         explanations = {
             "Model generated empty output": "Unable to generate a response. Please try rephrasing your question.",
             "Output contains excessive repetition": "The response contains repetitive content which may indicate a system issue. Please try a different question.",
@@ -194,15 +227,16 @@ class CustomGuardrails:
             if key in reason:
                 return value
         
-        return f"We cannot provide this information due to safety restrictions: {reason}. Please try a different question."
+        return f"We cannot provide this information due to safety restrictions. Please try a different question."
     
-    def process_request(self, user_input: str, llm_output: str) -> Dict:
+    def process_request(self, user_input: str, llm_output: str, skip_repetition_check: bool = True) -> Dict:
         """
         Complete guardrails pipeline: validate input -> check safety -> filter output.
         
         Args:
             user_input: Original user query
             llm_output: Generated response from LLM
+            skip_repetition_check: If True (default), skip repetition check for Q&A answers
         
         Returns:
             Dict with keys:
@@ -239,13 +273,17 @@ class CustomGuardrails:
             result['message'] = f"Input validation failed: {error}"
             return result
         
-        # Step 2: Check output safety
-        is_safe, error = self.check_output_safety(llm_output)
+        # Step 2: Check output safety (skip repetition check for Q&A by default)
+        is_safe, error = self.check_output_safety(llm_output, skip_repetition_check=skip_repetition_check)
         if not is_safe:
-            # Mark content as blocked and generate explanation
+            # Mark content as blocked and generate intelligent explanation using LLM
             result['content_blocked'] = True
             result['block_reason'] = error
-            result['safety_explanation'] = self.generate_safety_explanation(error, llm_output)
+            result['safety_explanation'] = self.generate_safety_explanation(
+                error, 
+                blocked_content=llm_output,
+                user_question=user_input  # Pass user question for context
+            )
             result['is_safe'] = False
             result['safety_level'] = 'blocked'
             result['output_errors'] = [error]

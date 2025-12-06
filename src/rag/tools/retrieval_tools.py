@@ -322,7 +322,7 @@ Keep the message concise and helpful."""
         # If average relevance is very low, add warning to prompt
         low_relevance_warning = ""
         if avg_relevance < 0.5:
-            low_relevance_warning = "\n⚠️ QUALITY WARNING: Retrieved documents have low relevance scores (avg={:.3f}). Carefully verify context relevance before answering.".format(avg_relevance)
+            low_relevance_warning = "\n[QUALITY WARNING] Retrieved documents have low relevance scores (avg={:.3f}). Carefully verify context relevance before answering.".format(avg_relevance)
         
         # Build a meta-cognitive prompt with Chain-of-Thought reasoning
         prompt = f"""You are a helpful assistant that answers questions ONLY based on provided context.

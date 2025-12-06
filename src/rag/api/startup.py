@@ -45,7 +45,7 @@ def start_api_server(port=8001, reload=False):
     """Start RAG API server in subprocess"""
     logger.info("")
     logger.info("=" * 80)
-    logger.info("🚀 Starting RAG API Server...")
+    logger.info("[START] Starting RAG API Server...")
     logger.info("=" * 80)
     logger.info(f"API will be available at: http://localhost:{port}")
     logger.info(f"API Docs: http://localhost:{port}/docs")

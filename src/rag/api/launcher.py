@@ -54,7 +54,7 @@ def run_langgraph(host: str = "0.0.0.0",
     
     logger.info("")
     logger.info("=" * 80)
-    logger.info("🚀 Starting LangGraph RAG Agent API")
+    logger.info("[START] Starting LangGraph RAG Agent API")
     logger.info("=" * 80)
     logger.info(f"Host: {host}")
     logger.info(f"Port: {port}")

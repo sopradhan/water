@@ -187,9 +187,9 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Initializing LangGraph RAG Agent...")
         agent = LangGraphRAGAgent()
-        logger.info("✅ LangGraph RAG Agent initialized successfully")
+        logger.info("[OK] LangGraph RAG Agent initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize agent: {str(e)}")
+        logger.error(f"[ERROR] Failed to initialize agent: {str(e)}")
         raise
     
     yield  # Application runs here

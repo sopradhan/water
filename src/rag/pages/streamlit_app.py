@@ -42,7 +42,7 @@ import base64
 # Page config
 st.set_page_config(
     page_title="LangGraph RAG Agent",
-    page_icon="🤖",
+    page_icon="💧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -485,7 +485,7 @@ API_BASE_URL = os.getenv("RAG_API_URL", "http://localhost:8001")
 
 st.markdown("""
 <div class="header-container">
-    <h1>🤖 LangGraph RAG Agent Dashboard</h1>
+    <h1>[RAG] LangGraph RAG Agent Dashboard</h1>
     <p>Intelligent Document Ingestion, Retrieval & Optimization</p>
 </div>
 """, unsafe_allow_html=True)
@@ -630,14 +630,14 @@ def create_pipeline_timeline(stages):
             x=[stage.get('duration', 1)],
             orientation='h',
             marker=dict(color=colors[i % len(colors)]),
-            text=f"{stage.get('status', '⏳')} {stage.get('progress', '0')}%",
+            text=f"[PENDING] {stage.get('progress', '0')}%",
             textposition='auto',
             hovertemplate=f"<b>{stage['name']}</b><br>Progress: {stage.get('progress', 0)}%<extra></extra>",
             showlegend=False
         ))
     
     fig.update_layout(
-        title="📊 Pipeline Progress",
+        title="[PROGRESS] Pipeline Progress",
         xaxis_title="Progress",
         yaxis_title="",
         height=300,
@@ -646,12 +646,12 @@ def create_pipeline_timeline(stages):
     )
     
     return fig
-st.title("🤖 LangGraph RAG Agent Dashboard")
+st.title("[RAG] LangGraph RAG Agent Dashboard")
 st.markdown("Test the LangGraph agent through a user-friendly interface")
 
 # Sidebar
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("[CONFIG] Configuration")
     
     api_url = st.text_input(
         "API Base URL",
@@ -660,18 +660,18 @@ with st.sidebar:
     )
     
     # Health Check
-    if st.button("🔍 Check API Health", use_container_width=True):
+    if st.button("[CHECK] Check API Health", use_container_width=True):
         try:
             response = requests.get(f"{api_url}/health", timeout=5)
             if response.status_code == 200:
                 health = response.json()
-                st.success(f"✅ API is running! Status: {health.get('status', 'unknown')}")
+                st.success(f"[OK] API is running! Status: {health.get('status', 'unknown')}")
             else:
-                st.error(f"❌ API returned status {response.status_code}")
+                st.error(f"[ERROR] API returned status {response.status_code}")
         except requests.exceptions.ConnectionError:
-            st.error(f"❌ Cannot connect to API at {api_url}")
+            st.error(f"[ERROR] Cannot connect to API at {api_url}")
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"[ERROR] Error: {str(e)}")
     
     st.divider()
     
@@ -952,7 +952,7 @@ with tab1:
                         with metrics_placeholder.container():
                             metric1, metric2, metric3 = st.columns(3)
                             with metric1:
-                                st.metric("Status", "✅ Complete")
+                                st.metric("Status", "[OK] Complete")
                             with metric2:
                                 st.metric("Quality Score", f"{quality:.2%}")
                             with metric3:
@@ -960,7 +960,7 @@ with tab1:
                         
                         # Update graph with results
                         retrieval_graph_final = create_retrieval_graph(question, len(result.get("sources", [])))
-                        final_fig = plot_workflow_graph(retrieval_graph_final, "✅ Retrieval Complete - Sources Retrieved")
+                        final_fig = plot_workflow_graph(retrieval_graph_final, "[OK] Retrieval Complete - Sources Retrieved")
                         graph_placeholder.plotly_chart(final_fig, use_container_width=True)
                         
                         st.divider()
@@ -985,7 +985,7 @@ with tab1:
                             with st.expander("🔧 Technical Details"):
                                 st.json(result["metadata"])
                         
-                        st.success("✅ Query completed successfully")
+                        st.success("[OK] Query completed successfully")
                         
                     else:
                         st.error(f"❌ API error: {response.status_code}")
@@ -1085,17 +1085,17 @@ with tab2:
                         }
                         
                         # Animate stages
-                        stages[0] = {"name": "Extracting", "status": "✅", "progress": 100, "duration": 1}
+                        stages[0] = {"name": "Extracting", "status": "[OK]", "progress": 100, "duration": 1}
                         timeline_fig = create_pipeline_timeline(stages)
                         timeline_placeholder.plotly_chart(timeline_fig, use_container_width=True)
                         time.sleep(0.3)
                         
-                        stages[1] = {"name": "Chunking", "status": "✅", "progress": 100, "duration": 1}
+                        stages[1] = {"name": "Chunking", "status": "[OK]", "progress": 100, "duration": 1}
                         timeline_fig = create_pipeline_timeline(stages)
                         timeline_placeholder.plotly_chart(timeline_fig, use_container_width=True)
                         time.sleep(0.3)
                         
-                        stages[2] = {"name": "Embedding", "status": "✅", "progress": 100, "duration": 1}
+                        stages[2] = {"name": "Embedding", "status": "[OK]", "progress": 100, "duration": 1}
                         timeline_fig = create_pipeline_timeline(stages)
                         timeline_placeholder.plotly_chart(timeline_fig, use_container_width=True)
                         time.sleep(0.3)
@@ -1117,11 +1117,11 @@ with tab2:
                             # Update graph with final results
                             chunks_created = result.get("chunks_created", num_chunks_estimated)
                             ingestion_graph_final = create_ingestion_graph(chunks_created, result.get("vectors_saved", chunks_created))
-                            final_fig = plot_workflow_graph(ingestion_graph_final, "✅ Ingestion Complete - Document Stored")
+                            final_fig = plot_workflow_graph(ingestion_graph_final, "[OK] Ingestion Complete - Document Stored")
                             graph_placeholder.plotly_chart(final_fig, use_container_width=True)
                             
                             st.divider()
-                            st.success("✅ Document ingested successfully!")
+                            st.success("[OK] Document ingested successfully!")
                             
                             col1, col2, col3 = st.columns(3)
                             with col1:
@@ -1181,7 +1181,7 @@ with tab2:
                 
                 with st.spinner("📤 Processing file... This may take a few minutes for PDFs"):
                     try:
-                        stages[0] = {"name": "Reading File", "status": "✅", "progress": 100, "duration": 1}
+                        stages[0] = {"name": "Reading File", "status": "[OK]", "progress": 100, "duration": 1}
                         timeline_fig = create_pipeline_timeline(stages)
                         timeline_placeholder.plotly_chart(timeline_fig, use_container_width=True)
                         time.sleep(0.3)
@@ -1199,7 +1199,7 @@ with tab2:
                         else:
                             text = file_content.decode('utf-8', errors='ignore')
                         
-                        stages[2] = {"name": "Processing", "status": "✅", "progress": 100, "duration": 1}
+                        stages[2] = {"name": "Processing", "status": "[OK]", "progress": 100, "duration": 1}
                         timeline_fig = create_pipeline_timeline(stages)
                         timeline_placeholder.plotly_chart(timeline_fig, use_container_width=True)
                         time.sleep(0.3)
@@ -1229,11 +1229,11 @@ with tab2:
                             # Update graph with final results
                             chunks_created = result.get("chunks_created", 10)
                             ingestion_graph_final = create_ingestion_graph(chunks_created, result.get("vectors_saved", chunks_created))
-                            final_fig = plot_workflow_graph(ingestion_graph_final, "✅ File Ingestion Complete")
+                            final_fig = plot_workflow_graph(ingestion_graph_final, "[OK] File Ingestion Complete")
                             graph_placeholder.plotly_chart(final_fig, use_container_width=True)
                             
                             st.divider()
-                            st.success("✅ File ingested successfully!")
+                            st.success("[OK] File ingested successfully!")
                             
                             col1, col2, col3 = st.columns(3)
                             with col1:
@@ -1301,7 +1301,7 @@ with tab2:
                                 result = response.json()
                                 
                                 st.divider()
-                                st.success("✅ Directory ingested successfully!")
+                                st.success("[OK] Directory ingested successfully!")
                                 
                                 col1, col2, col3, col4 = st.columns(4)
                                 with col1:
@@ -1406,7 +1406,7 @@ with tab2:
                                 result = response.json()
                                 
                                 st.divider()
-                                st.success("✅ SQLite table ingested successfully!")
+                                st.success("[OK] SQLite table ingested successfully!")
                                 
                                 col1, col2, col3, col4 = st.columns(4)
                                 with col1:
@@ -1483,7 +1483,7 @@ with tab3:
                 
                 if response.status_code == 200:
                     result = response.json()
-                    st.success("✅ Optimization completed!")
+                    st.success("[OK] Optimization completed!")
                     
                     # Display metrics
                     col1, col2, col3 = st.columns(3)
@@ -1590,7 +1590,7 @@ with tab5:
         
         client = chromadb.PersistentClient(path=chroma_path)
         collections = client.list_collections()
-        st.success(f"✅ Connected to ChromaDB - {len(collections)} collection(s) found")
+        st.success(f"[OK] Connected to ChromaDB - {len(collections)} collection(s) found")
         
     except Exception as e:
         st.error(f"❌ Failed to connect: {str(e)}")
@@ -2135,7 +2135,7 @@ with tab7:
                 with col2:
                     avg_truth = np.mean(truthfulness_scores) if truthfulness_scores else 0
                     st.metric(
-                        "✅ Truthfulness",
+                        "[OK] Truthfulness",
                         f"{avg_truth:.2%}",
                         help="How accurate is the retrieved context?"
                     )
