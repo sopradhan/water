@@ -55,6 +55,10 @@ SCALER_FILE = MODEL_CONFIG.get("scaler_file", "src/model/weights/scaler.pkl")
 LABEL_ENCODERS_FILE = MODEL_CONFIG.get("label_encoders_file", "src/model/weights/label_encoders.pkl")
 TARGET_ENCODER_FILE = MODEL_CONFIG.get("target_encoder_file", "src/model/weights/target_encoder.pkl")
 
+# Zone-specific model paths
+ZONE_MODELS_BASE = "src/model/model_weights"
+AVAILABLE_ZONES = ['Zone0', 'Zone1', 'Zone2']
+
 # API settings
 MODEL_API_PORT = API_CONFIG.get("model_port", 8002)
 MODEL_API_HOST = API_CONFIG.get("model_host", "0.0.0.0")
@@ -65,14 +69,21 @@ MODEL_API_HOST = API_CONFIG.get("model_host", "0.0.0.0")
 
 class SensorData(BaseModel):
     """Single sensor reading for prediction"""
-    pressure: float = Field(..., description="Water pressure in PSI")
-    temperature: float = Field(..., description="Temperature in Celsius")
-    ph_level: float = Field(..., description="pH level (0-14)")
-    dissolved_oxygen: float = Field(..., description="Dissolved oxygen in mg/L")
-    turbidity: float = Field(..., description="Turbidity in NTU")
-    flow_rate: float = Field(..., description="Flow rate in L/min")
-    location: Optional[str] = Field(None, description="Sensor location (e.g., valve_a)")
-    sensor_type: Optional[str] = Field(None, description="Sensor type (e.g., digital)")
+    zone_name: Optional[str] = Field(None, description="Zone (Zone0, Zone1, Zone2)", alias="ZoneName")
+    pressure_psi: float = Field(..., description="Water pressure in PSI", alias="Pressure_PSI")
+    master_flow_lpm: float = Field(..., description="Master flow rate in L/min", alias="Master_Flow_LPM")
+    temperature_c: float = Field(..., description="Temperature in Celsius", alias="Temperature_C")
+    vibration: float = Field(..., description="Vibration in mm/s", alias="Vibration")
+    rpm: float = Field(..., description="RPM - revolutions per minute", alias="RPM")
+    operation_hours: float = Field(..., description="Operation hours - cumulative", alias="OperationHours")
+    acoustic_level: float = Field(..., description="Acoustic level in dB", alias="AcousticLevel")
+    ultrasonic_signal: float = Field(..., description="Ultrasonic signal in V", alias="UltrasonicSignal")
+    pipe_age: float = Field(..., description="Pipe age in years", alias="PipeAge")
+    soil_type: Optional[str] = Field(None, description="Soil type (e.g., clay, sand)", alias="SoilType")
+    material: Optional[str] = Field(None, description="Pipe material (e.g., PVC, cast_iron)", alias="Material")
+    
+    class Config:
+        populate_by_name = True
 
 class BatchPredictRequest(BaseModel):
     """Batch prediction request"""
@@ -87,7 +98,6 @@ class PredictionResponse(BaseModel):
     ensemble_prediction: str
     ensemble_confidence: float
     anomaly_detected: bool
-    risk_level: Optional[str] = None
 
 class SinglePredictResponse(BaseModel):
     """Response for single prediction"""
@@ -109,6 +119,8 @@ class HealthResponse(BaseModel):
     """Health check response"""
     status: str
     models: Dict[str, str]
+    available_zones: List[str]
+    current_zone: str
     version: str
     timestamp: str
 
@@ -117,56 +129,149 @@ class HealthResponse(BaseModel):
 # ============================================================================
 
 class ModelManager:
-    """Manages loading and using prediction models"""
+    """Manages loading and using prediction models - supports zone-specific models"""
     
     def __init__(self):
         """Initialize and load models"""
+        self.models = {}  # Store models for each zone
+        self.current_zone = 'Zone0'  # Default zone
         self.knn_model = None
         self.lstm_model = None
         self.scaler = None
         self.label_encoders = None
         self.target_encoder = None
+        # Must match training data features exactly
         self.numeric_features = [
-            'pressure', 'temperature', 'ph_level', 'dissolved_oxygen',
-            'turbidity', 'flow_rate'
+            'Pressure_PSI',
+            'Master_Flow_LPM',
+            'Temperature_C',
+            'Vibration',
+            'RPM',
+            'OperationHours',
+            'AcousticLevel',
+            'UltrasonicSignal',
+            'PipeAge'
         ]
-        self.categorical_features = ['location', 'sensor_type']
+        self.categorical_features = ['SoilType', 'Material']
         self.load_models()
     
-    def load_models(self):
-        """Load all trained models"""
+    def load_models_for_zone(self, zone_name: str = 'Zone0'):
+        """Load zone-specific models or fallback to main models"""
         try:
-            if Path(KNN_MODEL_FILE).exists():
-                self.knn_model = joblib.load(KNN_MODEL_FILE)
-                logger.info(f"[OK] Loaded KNN model from {KNN_MODEL_FILE}")
+            zone_dir = Path(ZONE_MODELS_BASE) / f"{zone_name}_models"
+            
+            # Try zone-specific directory first
+            if zone_dir.exists():
+                logger.info(f"Loading {zone_name}-specific models from {zone_dir}")
+                knn_path = zone_dir / "knn_model.pkl"
+                lstm_path = zone_dir / "lstm_model.h5"
+                scaler_path = zone_dir / "scaler.pkl"
+                encoders_path = zone_dir / "label_encoders.pkl"
+                target_path = zone_dir / "target_encoder.pkl"
             else:
-                logger.warning(f"[WARNING] KNN model not found at {KNN_MODEL_FILE}")
+                # Fallback to main model directory
+                logger.info(f"Zone directory not found, using main models")
+                knn_path = Path(ZONE_MODELS_BASE) / "knn_lazy_model.pkl"
+                lstm_path = Path(ZONE_MODELS_BASE) / "lstm_model.h5"
+                scaler_path = Path(ZONE_MODELS_BASE) / "scaler.pkl"
+                encoders_path = Path(ZONE_MODELS_BASE) / "label_encoders.pkl"
+                target_path = Path(ZONE_MODELS_BASE) / "target_encoder.pkl"
             
-            if Path(LSTM_MODEL_FILE).exists():
-                self.lstm_model = tf.keras.models.load_model(LSTM_MODEL_FILE)
-                logger.info(f"[OK] Loaded LSTM model from {LSTM_MODEL_FILE}")
+            # Load models
+            knn_model = joblib.load(knn_path) if knn_path.exists() else None
+            lstm_model = tf.keras.models.load_model(lstm_path) if lstm_path.exists() else None
+            scaler = joblib.load(scaler_path) if scaler_path.exists() else None
+            label_encoders = joblib.load(encoders_path) if encoders_path.exists() else None
+            target_encoder = joblib.load(target_path) if target_path.exists() else None
+            
+            if knn_model and lstm_model and scaler:
+                logger.info(f"[OK] Loaded all models for {zone_name}")
+                return {
+                    'knn': knn_model,
+                    'lstm': lstm_model,
+                    'scaler': scaler,
+                    'label_encoders': label_encoders,
+                    'target_encoder': target_encoder
+                }
             else:
-                logger.warning(f"[WARNING] LSTM model not found at {LSTM_MODEL_FILE}")
+                logger.error(f"[ERROR] Failed to load models for {zone_name}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"[ERROR] Error loading models for {zone_name}: {e}")
+            return None
+    
+    def load_models(self):
+        """Load all zone-specific models"""
+        try:
+            # Load models for each zone
+            for zone in AVAILABLE_ZONES:
+                models = self.load_models_for_zone(zone)
+                if models:
+                    self.models[zone] = models
+                    logger.info(f"[OK] Loaded models for {zone}")
             
-            if Path(SCALER_FILE).exists():
-                self.scaler = joblib.load(SCALER_FILE)
-                logger.info(f"[OK] Loaded scaler from {SCALER_FILE}")
-            
-            if Path(LABEL_ENCODERS_FILE).exists():
-                self.label_encoders = joblib.load(LABEL_ENCODERS_FILE)
-                logger.info(f"[OK] Loaded label encoders from {LABEL_ENCODERS_FILE}")
-            
-            if Path(TARGET_ENCODER_FILE).exists():
-                self.target_encoder = joblib.load(TARGET_ENCODER_FILE)
-                logger.info(f"[OK] Loaded target encoder from {TARGET_ENCODER_FILE}")
-            
+            # Set default to Zone0
+            if 'Zone0' in self.models:
+                zone_models = self.models['Zone0']
+                self.knn_model = zone_models['knn']
+                self.lstm_model = zone_models['lstm']
+                self.scaler = zone_models['scaler']
+                self.label_encoders = zone_models['label_encoders']
+                self.target_encoder = zone_models['target_encoder']
+                self.current_zone = 'Zone0'
+                logger.info("[OK] Initialized with Zone0 models")
+            else:
+                logger.warning("[WARNING] Could not load any zone models!")
+        
         except Exception as e:
             logger.error(f"[ERROR] Error loading models: {e}")
             raise
     
-    def preprocess_sample(self, sample_dict: Dict[str, Any]) -> np.ndarray:
+    def set_zone(self, zone_name: str = 'Zone0'):
+        """Switch to zone-specific models"""
+        if zone_name not in AVAILABLE_ZONES:
+            logger.warning(f"Zone {zone_name} not available, using Zone0")
+            zone_name = 'Zone0'
+        
+        if zone_name in self.models:
+            zone_models = self.models[zone_name]
+            self.knn_model = zone_models['knn']
+            self.lstm_model = zone_models['lstm']
+            self.scaler = zone_models['scaler']
+            self.label_encoders = zone_models['label_encoders']
+            self.target_encoder = zone_models['target_encoder']
+            self.current_zone = zone_name
+            logger.info(f"[OK] Switched to {zone_name} models")
+        else:
+            logger.error(f"Models for {zone_name} not found")
+    
+    def preprocess_sample(self, sample_dict: Dict[str, Any]) -> tuple:
         """Preprocess a single sample for prediction"""
-        df = pd.DataFrame([sample_dict])
+        # Map API field names to training data field names
+        field_mapping = {
+            'pressure_psi': 'Pressure_PSI',
+            'master_flow_lpm': 'Master_Flow_LPM',
+            'temperature_c': 'Temperature_C',
+            'vibration': 'Vibration',
+            'rpm': 'RPM',
+            'operation_hours': 'OperationHours',
+            'acoustic_level': 'AcousticLevel',
+            'ultrasonic_signal': 'UltrasonicSignal',
+            'pipe_age': 'PipeAge',
+            'soil_type': 'SoilType',
+            'material': 'Material'
+        }
+        
+        # Rename fields to match training data
+        mapped_dict = {}
+        for api_key, value in sample_dict.items():
+            if api_key in field_mapping:
+                mapped_dict[field_mapping[api_key]] = value
+            else:
+                mapped_dict[api_key] = value
+        
+        df = pd.DataFrame([mapped_dict])
         
         # Handle missing categorical features
         for col in self.categorical_features:
@@ -174,65 +279,113 @@ class ModelManager:
                 df[col] = 'unknown'
         
         # Encode categorical features
+        categorical_encoded = []
         for col in self.categorical_features:
             if col in self.label_encoders:
                 try:
-                    df[col] = self.label_encoders[col].transform(df[col].astype(str))
+                    encoded_val = self.label_encoders[col].transform([df[col].iloc[0]])[0]
+                    categorical_encoded.append(float(encoded_val))
                 except:
                     # Use 0 for unknown categories
-                    df[col] = 0
+                    categorical_encoded.append(0.0)
+            else:
+                categorical_encoded.append(0.0)
         
-        # Select and scale numeric features
-        X = df[self.numeric_features].values
+        # Select numeric features (don't scale yet)
+        X_numeric = df[self.numeric_features].values  # Shape: (1, 9)
+        X_categorical = np.array([categorical_encoded])  # Shape: (1, 2)
+        
+        # Combine numeric and categorical BEFORE scaling (scaler expects 11 features)
+        X_combined = np.hstack([X_numeric, X_categorical])  # Shape: (1, 11)
+        
+        # Now scale all 11 features
         if self.scaler:
-            X = self.scaler.transform(X)
+            X_combined = self.scaler.transform(X_combined)
         
-        return X, df[self.categorical_features].values
+        return X_combined
     
     def predict_single(self, sample: SensorData) -> Dict[str, Any]:
         """Predict anomaly for single sample"""
         sample_dict = sample.dict()
         
         try:
-            X_numeric, X_categorical = self.preprocess_sample(sample_dict)
-            X = np.hstack([X_numeric, X_categorical])
+            # Switch zone models if zone_name is provided
+            zone_name = sample_dict.pop('zone_name', None)
+            if zone_name:
+                self.set_zone(zone_name)
+            
+            # X_combined shape: (1, 11) - already preprocessed and scaled
+            X_combined = self.preprocess_sample(sample_dict)
             
             predictions = {
                 'knn_prediction': 'unknown',
                 'knn_confidence': 0.0,
+                'knn_all_confidences': {},
                 'lstm_prediction': 'unknown',
                 'lstm_confidence': 0.0,
+                'lstm_all_confidences': {},
                 'ensemble_prediction': 'unknown',
                 'ensemble_confidence': 0.0,
-                'anomaly_detected': False
+                'anomaly_detected': False,
+                'agreement': 'none'
             }
             
-            # KNN prediction
+            # KNN prediction - uses all 11 features
+            knn_pred_idx = None
+            knn_max_confidence = 0.0
             if self.knn_model:
-                knn_pred = self.knn_model.predict(X)
-                knn_proba = self.knn_model.predict_proba(X)
-                predictions['knn_prediction'] = self.target_encoder.inverse_transform(knn_pred)[0]
-                predictions['knn_confidence'] = float(np.max(knn_proba))
+                knn_pred_idx = self.knn_model.predict(X_combined)[0]
+                knn_proba = self.knn_model.predict_proba(X_combined)[0]
+                knn_pred = self.target_encoder.inverse_transform([knn_pred_idx])[0]
+                knn_max_confidence = float(np.max(knn_proba))
+                
+                predictions['knn_prediction'] = knn_pred
+                predictions['knn_confidence'] = knn_max_confidence
+                # Store all class confidences
+                for i, class_name in enumerate(self.target_encoder.classes_):
+                    predictions['knn_all_confidences'][class_name] = float(knn_proba[i])
             
-            # LSTM prediction
+            # LSTM prediction - uses all 11 features with time dimension
+            lstm_pred_idx = None
+            lstm_max_confidence = 0.0
             if self.lstm_model:
-                X_lstm = X_numeric.reshape((1, 1, X_numeric.shape[1]))
-                lstm_proba = self.lstm_model.predict(X_lstm, verbose=0)
+                # Reshape to (batch_size=1, time_steps=1, features=11)
+                X_lstm = X_combined.reshape((1, 1, X_combined.shape[1]))
+                lstm_proba = self.lstm_model.predict(X_lstm, verbose=0)[0]
                 lstm_pred_idx = np.argmax(lstm_proba)
                 lstm_pred = self.target_encoder.inverse_transform([lstm_pred_idx])[0]
+                lstm_max_confidence = float(np.max(lstm_proba))
+                
                 predictions['lstm_prediction'] = lstm_pred
-                predictions['lstm_confidence'] = float(np.max(lstm_proba))
+                predictions['lstm_confidence'] = lstm_max_confidence
+                # Store all class confidences
+                for i, class_name in enumerate(self.target_encoder.classes_):
+                    predictions['lstm_all_confidences'][class_name] = float(lstm_proba[i])
             
-            # Ensemble prediction (average confidence)
-            if predictions['knn_confidence'] > 0 and predictions['lstm_confidence'] > 0:
-                avg_confidence = (predictions['knn_confidence'] + predictions['lstm_confidence']) / 2
-                ensemble_pred = predictions['knn_prediction']  # Use KNN as primary
+            # Hybrid decision: if both agree, use that; else choose higher confidence
+            if knn_pred_idx is not None and lstm_pred_idx is not None:
+                if knn_pred_idx == lstm_pred_idx:
+                    # Both models agree
+                    final_pred_idx = knn_pred_idx
+                    predictions['agreement'] = 'both_agree'
+                    avg_confidence = (knn_max_confidence + lstm_max_confidence) / 2
+                else:
+                    # Models disagree - choose the one with higher confidence
+                    if knn_max_confidence > lstm_max_confidence:
+                        final_pred_idx = knn_pred_idx
+                        predictions['agreement'] = 'knn_higher_confidence'
+                        avg_confidence = knn_max_confidence
+                    else:
+                        final_pred_idx = lstm_pred_idx
+                        predictions['agreement'] = 'lstm_higher_confidence'
+                        avg_confidence = lstm_max_confidence
+                
+                ensemble_pred = self.target_encoder.inverse_transform([final_pred_idx])[0]
                 predictions['ensemble_prediction'] = ensemble_pred
                 predictions['ensemble_confidence'] = avg_confidence
                 
-                # Detect anomaly if either model predicts anomaly with high confidence
-                if (predictions['knn_prediction'] == 'anomaly' or 
-                    predictions['lstm_prediction'] == 'anomaly'):
+                # Detect anomaly if prediction is not "Normal"
+                if ensemble_pred != 'Normal':
                     predictions['anomaly_detected'] = True
             
             return predictions
@@ -265,14 +418,15 @@ async def startup_event():
     global model_manager
     logger.info("[START] Starting Water Anomaly Detection Model API...")
     logger.info("=" * 70)
-    logger.info(f"[INFO] Model Directory: {Path('src/model/weights').absolute()}")
-    logger.info(f"[INFO] KNN Model: {KNN_MODEL_FILE}")
-    logger.info(f"[INFO] LSTM Model: {LSTM_MODEL_FILE}")
+    logger.info(f"[INFO] Zone Models Base: {ZONE_MODELS_BASE}")
+    logger.info(f"[INFO] Available Zones: {AVAILABLE_ZONES}")
     logger.info("=" * 70)
     
     try:
         model_manager = ModelManager()
         logger.info("[OK] Model Manager initialized successfully")
+        logger.info(f"[OK] Available zones: {list(model_manager.models.keys())}")
+        logger.info(f"[OK] Current zone: {model_manager.current_zone}")
         logger.info(f"[INFO] Server running on http://{MODEL_API_HOST}:{MODEL_API_PORT}")
         logger.info("=" * 70)
     except Exception as e:
@@ -295,12 +449,14 @@ async def health_check():
         raise HTTPException(status_code=503, detail="Model manager not initialized")
     
     return HealthResponse(
-        status="operational" if model_manager.is_ready() else "degraded",
+        status="operational" if model_manager.knn_model and model_manager.lstm_model else "degraded",
         models={
             "knn": "loaded" if model_manager.knn_model else "not_loaded",
             "lstm": "loaded" if model_manager.lstm_model else "not_loaded"
         },
-        version="1.0",
+        available_zones=list(model_manager.models.keys()),
+        current_zone=model_manager.current_zone,
+        version="2.0 (Zone-Specific)",
         timestamp=datetime.now().isoformat()
     )
 
@@ -310,8 +466,8 @@ async def health_check():
 
 @app.post("/predict", response_model=SinglePredictResponse)
 async def predict_single(sample: SensorData):
-    """Predict anomaly for single sensor reading"""
-    if not model_manager or not model_manager.is_ready():
+    """Predict anomaly for single sensor reading (supports zone-specific models)"""
+    if not model_manager or not model_manager.knn_model or not model_manager.lstm_model:
         raise HTTPException(status_code=503, detail="Models not ready")
     
     start_time = time.time()
@@ -337,10 +493,12 @@ async def predict_single(sample: SensorData):
             analysis={
                 "anomaly_detected": prediction['anomaly_detected'],
                 "risk_level": risk_level,
-                "features_used": model_manager.numeric_features
+                "zone": model_manager.current_zone,
+                "features_used": model_manager.numeric_features,
+                "categorical_features": model_manager.categorical_features
             },
             execution_time_ms=execution_time,
-            model_version="v1.0"
+            model_version=f"v2.0-{model_manager.current_zone}"
         )
     
     except Exception as e:
